@@ -12,7 +12,9 @@ function setup(view = "review", responses = []) {
     return { ok: response.status === 0, status: response.status || 200, json: async () => response };
   } };
   const app = createImageReviewApp(browser); app.$el = { dataset: { view } };
-  return { app, requests, browser };
+  const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
+  app.$refs = { annotationDialog: dialog }; app.$nextTick = async () => {};
+  return { app, requests, browser, dialog };
 }
 const page = (items, hasMore = false) => ({ status: 0, data: { page: { items, has_more: hasMore } } });
 
@@ -66,7 +68,7 @@ test("a failed next-image read does not turn a committed annotation into a faile
   app.destroy();
 });
 
-test("skipping and paging never send an annotation write", async () => {
+test("list paging only reads records", async () => {
   const { app, requests } = setup("list", [page([record(1)], true), page([record(2)]), page([record(1)], true)]);
   await app.init(); await app.nextPage();
   assert.equal(app.pageNumber, 2);
@@ -74,11 +76,128 @@ test("skipping and paging never send an annotation write", async () => {
   assert.equal(app.pageNumber, 1);
   assert.ok(requests.every(({ options }) => !options.method));
   app.destroy();
-  const review = setup("review", [page([record(1)]), page([record(2)])]);
-  await review.app.init(); await review.app.nextImage();
-  assert.equal(review.app.current.id, 2);
-  assert.ok(review.requests.every(({ options }) => !options.method));
-  review.app.destroy();
+});
+
+test("skipping adopts the model prediction and advances only after saving", async () => {
+  const first = record(1);
+  const { app, requests } = setup("review", [page([first]), { status: 0, data: { saved: true } }, page([record(2)])]);
+  await app.init(); await app.acceptModel();
+  assert.deepEqual(JSON.parse(requests[1].options.body), { label: "1_valid", revision: 0 });
+  assert.equal(first.correction, first.label);
+  assert.equal(first.revision, 1);
+  assert.equal(app.current.id, 2);
+  assert.equal(app.reviewedCount, 1);
+  app.destroy();
+});
+
+test("failed model adoption preserves the current record and revision", async () => {
+  const first = record();
+  const { app, requests } = setup("review", [page([first]), { status: 503, message: "保存失败" }]);
+  await app.init(); await app.acceptModel();
+  assert.equal(app.current, first);
+  assert.equal(first.correction, undefined);
+  assert.equal(first.revision, 0);
+  assert.equal(app.reviewedCount, 0);
+  assert.equal(requests.length, 2);
+  app.destroy();
+});
+
+test("list annotations open locally in a dialog and update the card without reloading", async () => {
+  const first = record();
+  const { app, requests, dialog } = setup("list", [page([first]), { status: 0, data: { saved: true } }]);
+  await app.init(); await app.openAnnotation(first);
+  assert.equal(dialog.open, true);
+  assert.equal(requests.length, 1);
+  assert.equal(app.modalRecord.id, first.id);
+  await app.chooseLabel("0_invalid");
+  assert.equal(dialog.open, false);
+  assert.equal(app.modalRecord, null);
+  assert.equal(app.items[0].correction, "0_invalid");
+  assert.equal(app.items[0].label, "1_valid");
+  assert.equal(app.items[0].confidence, 0.8);
+  assert.equal(app.items[0].revision, 1);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(JSON.parse(requests[1].options.body), { label: "0_invalid", revision: 0 });
+  app.destroy();
+});
+
+test("closing the annotation dialog does not write", async () => {
+  const { app, requests, dialog } = setup("list", [page([record()])]);
+  await app.init(); await app.openAnnotation(app.items[0]); app.closeAnnotation();
+  assert.equal(dialog.open, false);
+  assert.equal(app.modalRecord, null);
+  assert.equal(requests.length, 1);
+  app.destroy();
+});
+
+test("quick adoption updates the card without fetching another record", async () => {
+  const { app, requests } = setup("list", [page([record()]), { status: 0, data: { saved: true } }]);
+  await app.init(); await app.acceptModel(app.items[0]);
+  assert.equal(app.items[0].correction, "1_valid");
+  assert.equal(app.items[0].revision, 1);
+  assert.equal(requests.length, 2);
+  app.destroy();
+});
+
+test("pending cards are removed after saving while pagination keeps the original cursor", async () => {
+  const { app, browser, requests } = setup("list", [page([record(1), record(2)], true), { status: 0, data: { saved: true } }, page([record(3)])]);
+  browser.location.search = "?review=pending";
+  await app.init(); await app.acceptModel(app.items[1]);
+  assert.deepEqual(app.items.map(({ id }) => id), [1]);
+  await app.nextPage();
+  assert.equal(new URL(requests[2].url, "https://example.com").searchParams.get("after_id"), "2");
+  assert.equal(app.items[0].id, 3);
+  app.destroy();
+});
+
+test("modal conflicts stay open and reload the latest revision before retry", async () => {
+  const updated = { ...record(), revision: 3, correction: "1_valid" };
+  const { app, requests, dialog } = setup("list", [page([record()]), { status: 409, message: "版本冲突" },
+    { status: 0, data: { record: updated } }, { status: 0, data: { saved: true } }]);
+  await app.init(); await app.openAnnotation(app.items[0]); await app.chooseLabel("0_invalid");
+  assert.equal(dialog.open, true);
+  assert.equal(app.modalError, "版本冲突");
+  assert.equal(app.items[0].revision, 0);
+  await app.reloadAnnotation(); await app.chooseLabel("0_invalid");
+  assert.deepEqual(JSON.parse(requests[3].options.body), { label: "0_invalid", revision: 3 });
+  assert.equal(app.items[0].revision, 4);
+  assert.equal(dialog.open, false);
+  app.destroy();
+});
+
+test("modal saving blocks dismissal and duplicate card actions", async () => {
+  const { app, browser, dialog } = setup("list", [page([record()])]);
+  await app.init(); await app.openAnnotation(app.items[0]);
+  let calls = 0, finish;
+  browser.fetch = async () => { calls++; await new Promise((resolve) => { finish = resolve; }); return { ok: true, status: 200, json: async () => ({ status: 0, data: { saved: true } }) }; };
+  const pending = app.chooseLabel("0_invalid");
+  app.closeAnnotation(); await app.acceptModel(app.items[0]); await app.chooseLabel("1_valid");
+  assert.equal(dialog.open, true);
+  assert.equal(calls, 1);
+  finish(); await pending;
+  assert.equal(dialog.open, false);
+  assert.equal(app.items[0].correction, "0_invalid");
+  app.destroy();
+});
+
+test("closing a reloading dialog cancels its read and ignores a late response", async () => {
+  const { app, browser } = setup("list", [page([record(1), record(2)])]);
+  await app.init(); await app.openAnnotation(app.items[0]);
+  let finish, signal;
+  browser.fetch = async (_url, options) => {
+    signal = options.signal;
+    await new Promise((resolve) => { finish = resolve; });
+    return { ok: true, status: 200, json: async () => ({ status: 0, data: { record: { ...record(1), revision: 7 } } }) };
+  };
+  const pending = app.reloadAnnotation();
+  app.closeAnnotation();
+  assert.equal(signal.aborted, true);
+  assert.equal(app.loading, false);
+  await app.openAnnotation(app.items[1]);
+  finish(); await pending;
+  assert.equal(app.modalRecord.id, 2);
+  assert.equal(app.items[0].revision, 0);
+  app.destroy();
 });
 
 test("draft filter edits do not change the active annotation range until applied", async () => {
