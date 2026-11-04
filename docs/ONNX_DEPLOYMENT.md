@@ -52,7 +52,7 @@ ONNX 只包含分类网络，**不包含图片解码、方向修正、缩放或�
    张量的一维索引为 `(通道 * 320 + y) * 320 + x`；每张图共 307,200 个 float32，标准小端二进制文件为 1,228,800 字节。
    不同图像库即便都叫 LANCZOS，也可能在 Alpha、取整、滤波边界或解码上存在差异。不要只确认输出尺寸相同；先对照标准图，再在真实图片上评估客户端预处理造成的预测变化。合成对照样本不覆盖所有 EXIF、色彩配置和图片格式，需要补充实际业务图片验收。
 ## Go 服务接入
-可编译的 Go API 服务、依赖安装、上传 JPEG/WebP/PNG、图片 URL 下载和标准样本校验教程见 [GO_ONNX_SERVER.md](GO_ONNX_SERVER.md)，代码位于 [go-server/](go-server/)。
+本仓库的 Go API 服务、依赖配置、上传 JPEG/WebP/AVIF/PNG、图片 URL 下载和标准样本校验教程见 [GO_ONNX_SERVER.md](GO_ONNX_SERVER.md)。公共实现位于 [services/imagefilter/](../services/imagefilter/)，命令位于 [cmd/image_filter.go](../cmd/image_filter.go)，HTTP 处理位于 [api/handler/image_filter.go](../api/handler/image_filter.go)。
 Go 可以通过 ONNX Runtime C API 的 Go 绑定加载模型，例如第三方项目 [onnxruntime_go](https://github.com/yalue/onnxruntime_go)。它不是 Microsoft 官方 Go SDK；部署时还需要对应系统及 CPU 架构的 ONNX Runtime 原生动态库，并按绑定项目要求匹配库版本和构建环境。
 初始化时读取模型、labels 和真实输入输出节点名，创建并复用推理会话。每次请求提供 `[1,3,320,320]` 的 float32 输入，读取 `[1,2]` 概率。该文件固定 batch=1，多个请求可按所选绑定的并发和内存管理约定处理；不能直接塞入 batch>1 的张量。
 ## Android / iOS 接入

@@ -8,6 +8,7 @@ require (
 	ariga.io/atlas v1.3.0
 	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/ThreeDotsLabs/watermill-redisstream v1.4.5
+	github.com/gen2brain/gav1d v0.2.6
 	github.com/gin-contrib/cors v1.7.10
 	github.com/gin-contrib/logger v1.2.10
 	github.com/gin-contrib/requestid v1.0.9
@@ -20,6 +21,8 @@ require (
 	github.com/rs/zerolog v1.35.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	github.com/yalue/onnxruntime_go v1.38.0
+	golang.org/x/image v0.47.0
 	golang.org/x/sync v0.24.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.2

@@ -1,0 +1,148 @@
+package server
+
+import (
+	"bytes"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/spf13/viper"
+
+	"github.com/caitun/inferkit/services/apitoken"
+	"github.com/caitun/inferkit/services/imagefilter"
+)
+
+const imageFilterTestIdentity = "image-filter-test"
+
+func TestImageFilterAuthenticatedAPIIntegration(t *testing.T) {
+	dir := os.Getenv("IMAGE_FILTER_TEST_MODEL")
+	if dir == "" {
+		t.Skip("set IMAGE_FILTER_TEST_MODEL to run native HTTP integration")
+	}
+	settings := viper.New()
+	settings.Set("image.filter.model", dir)
+	settings.Set("image.filter.library", os.Getenv("IMAGE_FILTER_TEST_LIBRARY"))
+	filter, err := imagefilter.New(imagefilter.Configuration(settings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := filter.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+	token := imageFilterAPIToken(t)
+	s := NewServer("", gin.TestMode)
+	s.ImageFilter = filter
+	router := s.newRouter()
+	assertImageFilterPage(t, router)
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/image/filter", nil))
+	if unauthorized.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated request: %d", unauthorized.Code)
+	}
+	request := imageFilterUpload(t, dir)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"label":"0_invalid"`) {
+		t.Fatalf("classification: %d %s", response.Code, response.Body)
+	}
+	assertImageFilterFormats(t, router, token)
+}
+
+func assertImageFilterFormats(t *testing.T, router http.Handler, token string) {
+	t.Helper()
+	root, err := os.OpenRoot("../../services/imagefilter/testdata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := root.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	})
+	for _, format := range []string{"jpeg", "webp", "avif", "png"} {
+		data, readErr := root.ReadFile("sample." + format)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		// A misleading extension and generic upload content type must not prevent
+		// decoding supported formats from their actual bytes.
+		request := imageFilterUploadBytes(t, data, "image.bin")
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Errorf("%s upload: %d %s", format, response.Code, response.Body)
+		}
+	}
+}
+
+func assertImageFilterPage(t *testing.T, router http.Handler) {
+	t.Helper()
+	response := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/image-filter", nil)
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "本次检测历史") {
+		t.Fatalf("image workbench: %d %s", response.Code, response.Body)
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("workbench should not be cached")
+	}
+}
+
+func imageFilterAPIToken(t *testing.T) string {
+	t.Helper()
+	settings := map[string]any{"auth.api.secret": "image-filter-integration-test-secret", "auth.api.audience": imageFilterTestIdentity, "auth.api.issuers": []string{imageFilterTestIdentity}}
+	for key, value := range settings {
+		old := viper.Get(key)
+		viper.Set(key, value)
+		t.Cleanup(func() { viper.Set(key, old) })
+	}
+	token, err := apitoken.Issue(apitoken.Settings{
+		Secret: []byte(viper.GetString("auth.api.secret")), Audience: imageFilterTestIdentity,
+		Issuers: []string{imageFilterTestIdentity}, Lifetime: apitoken.DefaultLifetime,
+	}, "test-client", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func imageFilterUpload(t *testing.T, dir string) *http.Request {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "fixtures/000_source.png")) //nolint:gosec // The test operator explicitly selects the local model fixture directory through IMAGE_FILTER_TEST_MODEL.
+	if err != nil {
+		t.Fatal(err)
+	}
+	return imageFilterUploadBytes(t, data, "fixture.png")
+}
+
+func imageFilterUploadBytes(t *testing.T, data []byte, name string) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = part.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.WriteField("url", "https://example.com/original.png"); err != nil {
+		t.Fatal(err)
+	}
+	if err = writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/image/filter", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	return request
+}

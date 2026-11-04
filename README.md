@@ -1,6 +1,12 @@
 # Go-Blueprint
 The project template of Golang.
 
+## Image Filter
+
+- [第三方图片分类 API 接入文档](docs/IMAGE_FILTER_API.md)
+- [Go CPU 部署、CLI 和浏览器检测工作台](docs/GO_ONNX_SERVER.md)
+- [ONNX 模型部署协议](docs/ONNX_DEPLOYMENT.md)
+
 ## How to use
 ```shell
 gonew github.com/caitunai/go-blueprint@v1.9.29 github.com/yourname/project

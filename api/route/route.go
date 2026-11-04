@@ -5,16 +5,20 @@ import (
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/api/handler"
+	"github.com/caitun/inferkit/services/imagefilter"
 )
 
 // InitRoute performs the init route operation.
-func InitRoute(r *base.Router) {
+func InitRoute(r *base.Router, filter *imagefilter.Service) {
 	InitMiddleware()
 	r.Use(AttemptAuth())
 
 	initPackageHandler(r)
+	if filter != nil {
+		r.GET("/image-filter", handler.ImageFilterPage(filter))
+	}
 	initConfigCenterHandler(r)
-	initAPIHandler(r)
+	initAPIHandler(r, filter)
 }
 
 func initPackageHandler(r *base.Router) {
@@ -39,9 +43,12 @@ func initConfigCenterHandler(r *base.Router) {
 	handler.ConfigCenterRuntimeControl(configCenterRuntime)
 }
 
-func initAPIHandler(r *base.Router) {
+func initAPIHandler(r *base.Router, filter *imagefilter.Service) {
 	api := r.Group("/api", apiAuthorized)
 	api.GET("/", handler.APIHomePage)
+	if filter != nil {
+		api.POST("/image/filter", handler.FilterImage(filter))
+	}
 
 	// Add CRUD services for db.User
 	handler.UserControl(api.Group("/users"))

@@ -21,13 +21,15 @@ import (
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/api/route"
+	"github.com/caitun/inferkit/services/imagefilter"
 	"github.com/caitun/inferkit/xutil"
 )
 
 // Server represents server data.
 type Server struct {
-	Port string
-	Mode string
+	ImageFilter *imagefilter.Service
+	Port        string
+	Mode        string
 }
 
 const (
@@ -105,11 +107,7 @@ func (s *Server) newRouter() *gin.Engine {
 	})))
 	r.Use(gin.Recovery())
 	r.Use(cors.New(cors.Config{
-		AllowOrigins: []string{
-			"https://www.example.com",
-			"https://example.com",
-			viper.GetString("url"),
-		},
+		AllowOrigins:     configuredOrigins(),
 		AllowMethods:     []string{"POST", "PUT", "PATCH", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "x-requested-with"},
 		ExposeHeaders:    []string{"Content-Length"},
@@ -123,9 +121,17 @@ func (s *Server) newRouter() *gin.Engine {
 		},
 		MaxAge: 12 * time.Hour,
 	}))
-	route.InitRoute(base.NewRouter(r))
+	route.InitRoute(base.NewRouter(r), s.ImageFilter)
 	r.HTMLRender = base.NewRender()
 	return r
+}
+
+func configuredOrigins() []string {
+	origins := []string{"https://www.example.com", "https://example.com"}
+	if origin := viper.GetString("url"); origin != "" {
+		origins = append(origins, origin)
+	}
+	return origins
 }
 
 func serve(srv *http.Server) {

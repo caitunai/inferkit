@@ -58,6 +58,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         configCenter: fileURLToPath(new URL("./src/config-center/main.js", import.meta.url)),
+        imageFilter: fileURLToPath(new URL("./src/image-filter/main.js", import.meta.url)),
       },
     },
   },

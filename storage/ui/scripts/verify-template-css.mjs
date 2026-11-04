@@ -30,3 +30,11 @@ if (missing.length > 0) {
 }
 
 console.log(`Verified ${requiredSelectors.size} template-only Tailwind selectors.`);
+
+const imageEntry = manifest["src/image-filter/main.js"];
+if (!imageEntry?.css?.length) throw new Error("Image filter entry is missing its stylesheet");
+const imageCSS = (await Promise.all(imageEntry.css.map((file) => readFile(resolve("dist", file), "utf8")))).join("\n");
+for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".gap-6{", ".sr-only{", ".sm\\:grid-cols-2{", ".xl\\:grid-cols-4{"]) {
+  if (!imageCSS.includes(selector)) throw new Error(`Image filter CSS is missing template utility ${selector}`);
+}
+console.log("Verified image filter layout and accessibility utilities.");

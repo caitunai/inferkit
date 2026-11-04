@@ -414,3 +414,4 @@ stats.html
 .env.production
 deploy.sh
 go-blueprint
+/inferkit

@@ -11,6 +11,7 @@ import (
 	"github.com/caitun/inferkit/cache"
 	"github.com/caitun/inferkit/queue"
 	"github.com/caitun/inferkit/redis"
+	"github.com/caitun/inferkit/services/imagefilter"
 )
 
 // ErrServeCommand indicates run serve command failed.
@@ -27,7 +28,16 @@ var serveCmd = &cobra.Command{
 		}
 		return nil
 	},
-	RunE: func(cmd *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) (returnErr error) {
+		var filter *imagefilter.Service
+		if viper.GetString("image.filter.model") != "" {
+			var initErr error
+			filter, initErr = imagefilter.New(imagefilter.Configuration(viper.GetViper()))
+			if initErr != nil {
+				return errors.Join(ErrServeCommand, initErr)
+			}
+			defer func() { returnErr = errors.Join(returnErr, filter.Close()) }()
+		}
 		if err := redis.Init(cmd.Context()); err != nil {
 			return errors.Join(ErrServeCommand, err)
 		}
@@ -43,6 +53,7 @@ var serveCmd = &cobra.Command{
 			return errors.Join(ErrServeCommand, err)
 		}
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
+		s.ImageFilter = filter
 		s.Start(cmd.Context())
 		return nil
 	},

@@ -83,6 +83,8 @@ api="https://www.example.com"
 publicKeyPath="/path/to/oauth-public.key"
 
 [auth.api]
+# api-token create signs HS256 tokens with this secret (at least 32 bytes).
+# Keep the real secret outside version control. Default token lifetime: 365 days.
 secret="32-chars-length"
 audience="name of this api"
 issuers=[ "allowed name of issuer" ]
@@ -134,3 +136,13 @@ keyring="/absolute/path/to/config-center-keys.json"
 
 [image.filter]
 model="/path/to/artwork_fp32"
+# Optional native CPU library path. macOS Homebrew is detected automatically.
+library=""
+concurrency=2
+threads=1
+maxRequests=8
+timeout="30s"
+maxBytes=10485760
+maxPixels=20000000
+cacheEntries=1024
+cacheTTL="5m"
