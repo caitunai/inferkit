@@ -32,10 +32,7 @@ else
   bash scripts/prepare-onnxruntime-linux.sh "$stage/onnxruntime"
 fi
 go mod download
-binding=$(go list -m -f '{{.Dir}}' github.com/yalue/onnxruntime_go)
-api_version() { awk '$1 == "#define" && $2 == "ORT_API_VERSION" { print $3; exit }' "$1"; }
-[[ "$(api_version "$binding/onnxruntime_c_api.h")" == "$(api_version "$stage/onnxruntime/include/onnxruntime_c_api.h")" ]] \
-  || fail 'Go binding and bundled ONNX Runtime C API versions differ; update the pinned runtime package together with the binding'
+bash scripts/check-onnxruntime-api.sh "$stage/onnxruntime"
 
 (cd storage/ui && npm ci && npm run build)
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 go build -trimpath -o "$stage/inferkit" .

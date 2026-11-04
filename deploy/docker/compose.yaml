@@ -1,0 +1,32 @@
+services:
+  inferkit:
+    image: ${INFERKIT_IMAGE:?Set INFERKIT_IMAGE to the container image name}
+    platform: linux/amd64
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${INFERKIT_PORT:-8081}:8080"
+    environment:
+      PORT: "8080"
+    volumes:
+      - type: bind
+        source: ${INFERKIT_CONFIG:-./app.toml}
+        target: /etc/inferkit/app.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${INFERKIT_MODEL:-./artwork_fp32}
+        target: /models/artwork_fp32
+        read_only: true
+        bind:
+          create_host_path: false
+      - inferkit-data:/var/lib/inferkit
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 45s
+
+volumes:
+  inferkit-data:

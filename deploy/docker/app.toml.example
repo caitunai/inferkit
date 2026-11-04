@@ -1,0 +1,41 @@
+# Copy to app.toml and fill in your existing secrets before deployment.
+port="8080"
+mode="release"
+url="https://your-domain.example"
+key=""
+
+[logger]
+level="info"
+
+[server]
+readHeaderTimeout="5s"
+shutdownTimeout="30s"
+
+[storage]
+path="/var/lib/inferkit"
+
+[auth.api]
+# Reuse existing values when migrating, so current API tokens remain valid.
+# For a new deployment, secret must contain at least 32 bytes.
+secret=""
+audience="inferkit-image-api"
+issuers=["inferkit"]
+
+[image.filter]
+model="/models/artwork_fp32"
+library="/opt/onnxruntime/lib/libonnxruntime.so.1"
+recordResults=false
+concurrency=2
+threads=1
+maxRequests=8
+timeout="30s"
+maxBytes=10485760
+maxPixels=20000000
+cacheEntries=1024
+cacheTTL="5m"
+
+[image.review]
+enabled=false
+
+[ui]
+assetMode="embedded"

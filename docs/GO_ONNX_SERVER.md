@@ -10,6 +10,8 @@
 
 Debian 11 x86_64 直接运行二进制的构建、ONNX Runtime 固定版本下载、系统 ABI 检查及 systemd 配置见 [Debian 11 原生部署](DEBIAN11_DEPLOYMENT.md)。应在 Debian 11 上启用 CGO 构建，避免引入较新系统的 glibc 依赖。
 
+需要直接拉取运行环境时，使用 [Debian 13 amd64 Docker 镜像](DOCKER_DEPLOYMENT.md)：GitHub Actions 构建、测试后发布到 GHCR，并可同时发布到 Docker Hub，部署时只需挂载配置和模型目录。
+
 使用项目 `go.mod` 指定的 Go 1.27、C 编译器和 `CGO_ENABLED=1` 构建。Go 绑定固定为 `github.com/yalue/onnxruntime_go v1.38.0`，需部署与其 C API 兼容、匹配操作系统及 CPU 架构的原生 ONNX Runtime 动态库。本机使用 ONNX Runtime 1.31.1 完成验收。macOS Homebrew 标准安装路径会自动检测；其他安装方式在配置中显式指定库文件。Linux 默认加载 `libonnxruntime.so`，Windows 默认加载 `onnxruntime.dll`。
 
 在 `.app.toml` 中配置（完整模板见 `/.app.toml.example`）：

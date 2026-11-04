@@ -102,6 +102,36 @@ class DeploymentScripts(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(marker.read_text(), "preserve me")
 
+    def api_headers(self, requested, provided):
+        binding = self.root / "binding"
+        binding.mkdir()
+        (binding / "onnxruntime_c_api.h").write_text(f"#define ORT_API_VERSION {requested}\n")
+        runtime = self.root / "onnxruntime"
+        (runtime / "include").mkdir(parents=True)
+        (runtime / "include/onnxruntime_c_api.h").write_text(f"#define ORT_API_VERSION {provided}\n")
+        self.command("go", 'printf "%s\\n" "$TEST_BINDING"')
+        self.environment["TEST_BINDING"] = str(binding)
+        return runtime
+
+    def test_matching_runtime_api_is_accepted(self):
+        runtime = self.api_headers(31, 31)
+        result = self.run_script("check-onnxruntime-api.sh", runtime)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("C API 31 matches", result.stdout)
+
+    def test_newer_binding_cannot_silently_use_an_older_runtime(self):
+        runtime = self.api_headers(32, 31)
+        result = self.run_script("check-onnxruntime-api.sh", runtime)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requests 32", result.stderr)
+        self.assertIn("provides 31", result.stderr)
+
+    def test_invalid_api_headers_do_not_compare_as_empty_versions(self):
+        runtime = self.api_headers("", "")
+        result = self.run_script("check-onnxruntime-api.sh", runtime)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid", result.stderr)
+
     @unittest.skipUnless(os.environ.get("ONNXRUNTIME_TEST_ARCHIVE"), "set ONNXRUNTIME_TEST_ARCHIVE for official offline-package integration")
     def test_verified_offline_package_preserves_versioned_library_and_symlinks(self):
         output = self.root / "onnxruntime"
