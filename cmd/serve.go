@@ -53,7 +53,9 @@ var serveCmd = &cobra.Command{
 			return errors.Join(ErrServeCommand, err)
 		}
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
-		s.ImageFilter = filter
+		if setupErr := configureImageServer(cmd.Context(), s, filter); setupErr != nil {
+			return errors.Join(ErrServeCommand, setupErr)
+		}
 		s.Start(cmd.Context())
 		return nil
 	},

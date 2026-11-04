@@ -4,6 +4,8 @@
 
 第三方系统接入请阅读 [图片分类 API 接入文档](IMAGE_FILTER_API.md)，包含鉴权、上传及 URL 请求、响应字段、错误处理和客户端示例。
 
+带 URL 的结果采集、数据库迁移、筛选列表与逐张人工纠错见 [图片识别结果采集与人工纠错](IMAGE_REVIEW.md)。配置了 MySQL 时默认采集，启动前需应用迁移；无数据库的推理部署可设置 `image.filter.recordResults=false`。
+
 ## 安装与配置
 
 使用项目 `go.mod` 指定的 Go 1.27、C 编译器和 `CGO_ENABLED=1` 构建。Go 绑定固定为 `github.com/yalue/onnxruntime_go v1.38.0`，需部署与其 C API 兼容、匹配操作系统及 CPU 架构的原生 ONNX Runtime 动态库。本机使用 ONNX Runtime 1.31.1 完成验收。macOS Homebrew 标准安装路径会自动检测；其他安装方式在配置中显式指定库文件。Linux 默认加载 `libonnxruntime.so`，Windows 默认加载 `onnxruntime.dll`。
@@ -85,7 +87,9 @@ Token 单独保存在本站点的 `localStorage`，点击「访问设置 → 保
 
 生产构建的 CSS / JS 使用 `/assets/...` 同源路径，浏览器沿用页面的协议、域名和端口。HTTPS 在反向代理处终止、代理通过 HTTP 连接 Go 服务时，资源仍通过外部 HTTPS 地址加载，无需为静态资源单独配置协议。更新 Go 代码后需重新构建并部署二进制；页面模板和资源地址生成逻辑由服务端提供。
 
-本机已验证 `onnxruntime_go v1.38.0`、`golang.org/x/image v0.47.0` 与 ONNX Runtime 1.31.1 的组合：原始张量和图片 fixtures、实际 API、并发和取消测试均通过。公网 URL 若被本机代理的 Fake-IP DNS 解析到 `198.18.0.0/15` 等特殊网段，会被 SSRF 防护拒绝；应让下载服务使用真实公网 DNS 结果，保留目标地址安全校验。
+本机已验证 `onnxruntime_go v1.38.0`、`golang.org/x/image v0.47.0` 与 ONNX Runtime 1.31.1 的组合：原始张量和图片 fixtures、实际 API、并发和取消测试均通过。URL 下载使用系统 DNS 与标准网络连接，不限制 IP 网段，可沿用本机 TUN / Fake-IP 网络配置。
+
+检测失败时服务端记录 `image filter request failed` 日志，包含 `stage`、`status`、错误原因及可用的 `source_host` / `request_id`。DNS 错误补充解析域名和 DNS 服务器，连接错误补充远端地址，远端非 200 响应补充 `remote_status` 和内容类型。日志不记录完整图片 URL 或签名查询参数；4xx 使用 Warn，5xx 使用 Error。域名解析失败还会向页面和 API 返回 `data.code: "image_url_dns_failed"`，便于区分网络故障。
 
 ### 请求格式
 
@@ -136,13 +140,13 @@ URL 也可通过 `application/x-www-form-urlencoded` 或 multipart 的 `url` 字
 
 | HTTP 状态 | 含义 |
 | --- | --- |
-| 400 | 图片损坏、格式不支持或 URL 不合法 / 目标地址被阻止 |
+| 400 | 图片损坏、格式不支持或 URL 不合法 |
 | 403 | 现有 API 身份验证未通过 |
 | 408 | 请求取消或处理超时 |
 | 413 | 图片字节数、像素数或请求体超过限制 |
 | 429 | 已达到请求容量，调用方稍后重试 |
 | 502 | URL 下载或远端 HTTP 状态失败 |
-| 503 | 模型服务已开始关闭 |
+| 503 | 模型服务已开始关闭，或启用采集后结果未能保存 |
 | 500 | 推理失败或输出概率不合法 |
 
 ## 资源复用与安全边界
@@ -150,7 +154,7 @@ URL 也可通过 `application/x-www-form-urlencoded` 或 multipart 的 `url` 字
 - 每个进程实例只加载一个模型会话；`concurrency` 个独立输入/输出张量及 RunOptions 槽位可复用。固定 batch=1，每个调用独占一个槽位，不共享可变输入输出缓冲区。`threads` 控制每次运算的 CPU 线程数，默认 1；按部署 CPU 和真实流量测量后再调整，避免请求并发与算子线程相乘导致过度竞争。
 - `maxRequests` 在 HTTP 读取上传内容前实施背压，也限制服务内部调用。请求体最多额外允许 64 KiB multipart 元数据；超出 1 MiB 的 multipart 解析内容可临时落盘，结束时关闭并删除。下载和上传都有限时、限量，解码前检查像素总量，单边尺寸另有 32768 像素的安全上限以约束极端长图的滤波内存。只处理第一张静态图片，不支持动画或多帧业务语义。
 - 以实际内容 SHA-256 合并并发推理，文件和 URL 下载到相同字节时共用结果。成功结果以绝对 TTL 和固定 FIFO 容量保存在当前服务内存；只存哈希、标签及概率，不保存图片或来源 URL。失败不缓存，`cacheEntries=0` 可关闭完成结果复用，同时保留并发合并。首个执行者取消会使本次共享尝试失败，其他调用方可以重试。
-- URL 仅支持 HTTP(S)，禁用代理环境变量，禁止 URL 凭据和片段。DNS 解析后检查全部地址，并直接连接已检查的公网 IP，TLS 继续验证原域名；每次新连接及最多三次跳转均受检查。阻止环回、私网、链路本地、云元数据和常见特殊/隧道网段。文件附带的 URL 只验证语法，不访问网络。
+- URL 仅支持 HTTP(S)，禁用代理环境变量，禁止 URL 凭据和片段；不限制目标 IP 网段。最多跟随三次重定向，每次均验证 URL 格式。连接超时最多 5 秒，TLS 握手最多 5 秒，整个下载（含响应体读取）受 `image.filter.timeout` 限制，默认 30 秒；响应头最多 32 KiB，响应体受 `maxBytes` 限制，缺少 Content-Length 时同样限量。文件附带的 URL 只验证语法，不访问网络。
 - 预处理支持 JPEG/PNG/WebP 内的 EXIF 旋转与镜像，以及 AVIF 容器的 clap/irot/imir 变换；之后统一进行 ties-to-even 尺寸取整、Pillow 对齐的两遍 8 位 premultiplied RGBA LANCZOS、缩放后白底合成及 RGB NCHW。PNG fixtures 的逐值一致性不代表任意 JPEG 解码器、色彩配置或所有来源格式均逐像素一致，部署前仍应补充真实业务图片验收。
 - 停机先停止 HTTP，再拒绝新推理、等待已接收调用，最后释放会话、张量、RunOptions 和原生运行时。请求取消会调用 ONNX Runtime Terminate，回调完成后才重置槽位。
 

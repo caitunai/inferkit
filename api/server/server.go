@@ -21,15 +21,18 @@ import (
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/api/route"
+	"github.com/caitun/inferkit/db"
 	"github.com/caitun/inferkit/services/imagefilter"
 	"github.com/caitun/inferkit/xutil"
 )
 
 // Server represents server data.
 type Server struct {
-	ImageFilter *imagefilter.Service
-	Port        string
-	Mode        string
+	ImageFilter         *imagefilter.Service
+	ImageRecords        *db.ImageStore
+	Port                string
+	Mode                string
+	CollectImageResults bool
 }
 
 const (
@@ -121,7 +124,7 @@ func (s *Server) newRouter() *gin.Engine {
 		},
 		MaxAge: 12 * time.Hour,
 	}))
-	route.InitRoute(base.NewRouter(r), s.ImageFilter)
+	route.InitRoute(base.NewRouter(r), s.ImageFilter, s.ImageRecords, s.CollectImageResults)
 	r.HTMLRender = base.NewRender()
 	return r
 }

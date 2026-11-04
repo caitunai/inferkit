@@ -26,17 +26,18 @@ type Result struct {
 
 // Service owns a single model session. Call Close after stopping HTTP ingress.
 type Service struct {
-	engine    *engine
-	http      *resty.Client
-	cache     *resultStore
-	requests  chan struct{}
-	closeErr  error
-	labels    []string
-	config    Config
-	mu        sync.Mutex
-	active    sync.WaitGroup
-	closeOnce sync.Once
-	closed    bool
+	engine      *engine
+	http        *resty.Client
+	cache       *resultStore
+	requests    chan struct{}
+	closeErr    error
+	labels      []string
+	modelSHA256 string
+	config      Config
+	mu          sync.Mutex
+	active      sync.WaitGroup
+	closeOnce   sync.Once
+	closed      bool
 }
 
 // New verifies the package and loads one CPU session; no inference-time initialization occurs.
@@ -53,10 +54,13 @@ func New(c Config) (*Service, error) {
 		return nil, err
 	}
 	return &Service{
-		engine: e, http: newDownloader(c), config: c, labels: slices.Clone(m.Labels),
+		engine: e, http: newDownloader(c), config: c, labels: slices.Clone(m.Labels), modelSHA256: m.SHA256,
 		requests: make(chan struct{}, c.MaxRequests), cache: newResultStore(c),
 	}, nil
 }
+
+// ModelSHA256 identifies the loaded model without rereading its deployment files.
+func (s *Service) ModelSHA256() string { return s.modelSHA256 }
 
 // Close rejects new work, waits for admitted calls and frees all native resources once.
 func (s *Service) Close() error {
@@ -145,7 +149,7 @@ func (s *Service) infer(ctx context.Context, data []byte) (Result, error) {
 	case slot := <-s.engine.slots:
 		defer func() { s.engine.slots <- slot }()
 		if err := preprocess(ctx, data, s.config.MaxPixels, slot.input.GetData()); err != nil {
-			return Result{}, err
+			return Result{}, errors.Join(ErrPreprocess, err)
 		}
 		probabilities, err := s.engine.run(ctx, slot)
 		if err != nil {

@@ -5,11 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/viper"
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/db"
@@ -56,19 +54,7 @@ type configPublishForm struct {
 
 // ConfigCenterPage performs the config center page operation.
 func ConfigCenterPage(c *base.Context) {
-	cssFiles, jsFiles := c.GetCSSJsFiles(configCenterEntry)
-	assetMode := viper.GetString("ui.assetMode")
-	if assetMode == "" {
-		assetMode = "embedded"
-	}
-	c.View("config-center.index", gin.H{
-		"title":       "配置中心",
-		"use_vite":    assetMode == "vite",
-		"vite_origin": strings.TrimRight(viper.GetString("ui.viteDevOrigin"), "/"),
-		"entry":       configCenterEntry,
-		"css_files":   cssFiles,
-		"js_files":    jsFiles,
-	})
+	c.View("config-center.index", pageData(c, configCenterEntry, "配置中心"))
 }
 
 // ConfigCenterControl performs the config center control operation.

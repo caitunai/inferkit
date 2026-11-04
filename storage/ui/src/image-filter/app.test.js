@@ -124,3 +124,15 @@ test("concurrent submissions coalesce at the page and cancellation stops the req
   assert.match(app.history[0].error, /取消/);
   app.destroy();
 });
+
+test("DNS and download failures give specific hints without clearing valid credentials", async () => {
+  for (const [code, message] of [["image_url_dns_failed", /DNS/], [undefined, /无法下载图片/]]) {
+    const { app } = setup({ fetch: async () => ({ ok: false, status: 502, json: async () => ({ status: 502, data: { code } }) }) });
+    app.mode = "url"; app.url = "https://example.com/image.png";
+    await app.detect();
+    assert.match(app.error, message);
+    assert.equal(app.token, "test-token");
+    assert.equal(app.history.length, 1);
+    app.destroy();
+  }
+});

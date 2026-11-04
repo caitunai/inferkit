@@ -29,8 +29,12 @@ func (s imageCheckerStub) Check(_ context.Context, source imagefilter.Source) (i
 }
 
 func serveFilterRequest(request *http.Request, checker ImageChecker) *httptest.ResponseRecorder {
+	return serveRecordedFilterRequest(request, checker, nil)
+}
+
+func serveRecordedFilterRequest(request *http.Request, checker ImageChecker, recorder ImageRecorder) *httptest.ResponseRecorder {
 	r := gin.New()
-	base.NewRouter(r).POST("/image/filter", FilterImage(checker))
+	base.NewRouter(r).POST("/image/filter", FilterImage(checker, recorder))
 	response := httptest.NewRecorder()
 	r.ServeHTTP(response, request)
 	return response

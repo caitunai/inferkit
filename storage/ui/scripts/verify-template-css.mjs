@@ -38,3 +38,11 @@ for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".gap-6{", ".sr-o
   if (!imageCSS.includes(selector)) throw new Error(`Image filter CSS is missing template utility ${selector}`);
 }
 console.log("Verified image filter layout and accessibility utilities.");
+
+const reviewEntry = manifest["src/image-review/main.js"];
+if (!reviewEntry?.css?.length) throw new Error("Image review entry is missing its stylesheet");
+const reviewCSS = (await Promise.all(reviewEntry.css.map((file) => readFile(resolve("dist", file), "utf8")))).join("\n");
+for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".sm\\:grid-cols-2{", ".xl\\:grid-cols-4{", ".review-single", ".review-filters"]) {
+  if (!reviewCSS.includes(selector)) throw new Error(`Image review CSS is missing ${selector}`);
+}
+console.log("Verified image review gallery and single-image annotation styles.");

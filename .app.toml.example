@@ -26,7 +26,7 @@ port="3306"
 tls=false
 
 [db.table]
-prefix=""
+prefix="ifk"
 
 [redis]
 host="127.0.0.1"
@@ -136,6 +136,8 @@ keyring="/absolute/path/to/config-center-keys.json"
 
 [image.filter]
 model="/path/to/artwork_fp32"
+# Defaults to true when db.database is configured. Apply Atlas migrations first.
+recordResults=true
 # Optional native CPU library path. macOS Homebrew is detected automatically.
 library=""
 concurrency=2
@@ -146,3 +148,9 @@ maxBytes=10485760
 maxPixels=20000000
 cacheEntries=1024
 cacheTTL="5m"
+
+[image.review]
+# Separate administrator access; detection API tokens cannot annotate data.
+enabled=false
+username="image-review-admin"
+password="replace-with-at-least-16-random-characters"

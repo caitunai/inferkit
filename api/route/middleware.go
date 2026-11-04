@@ -34,6 +34,7 @@ const unauthorizedMessage = "unauthorized"
 
 // InitMiddleware performs the init middleware operation.
 func InitMiddleware() {
+	configureImageReviewAccess()
 	configureConfigCenterAccess(
 		viper.GetBool("configcenter.enabled"),
 		viper.GetString("configcenter.username"),

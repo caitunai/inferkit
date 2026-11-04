@@ -115,6 +115,7 @@ linters:
             - github.com/ThreeDotsLabs/watermill/message
             - golang.org/x/sync/errgroup
             - gorm.io/driver
+            - github.com/go-sql-driver/mysql
             - gorm.io/gorm
             - ariga.io/atlas/atlasexec
             - github.com/joho/godotenv

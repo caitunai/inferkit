@@ -1,0 +1,47 @@
+{{ define "content" }}
+<main x-data="imageReviewApp()" data-view="{{ if .review }}review{{ else }}list{{ end }}" x-cloak>
+  <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-filter">图片检测</a><a href="/image-review">识别记录</a><a :href="reviewLink">逐张标注 →</a></nav></div></header>
+  <div class="review-width">
+    <div class="review-heading"><h1 x-text="view === 'review' ? '逐张纠错标注' : '图片识别记录'"></h1><p>按模型预测筛选样本，人工标签独立保存，保留原始判断以供训练评估。</p></div>
+    <form class="review-filters" @submit.prevent="applyFilters()" aria-label="识别结果筛选">
+      <label class="review-field">预测类型<select x-model="filters.label" :disabled="busy"><option value="">全部类型</option>{{ range .labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>
+      <label class="review-field">最低置信度 (%)<input type="number" x-model="filters.min" min="0" max="100" step="0.01" required :disabled="busy"></label>
+      <label class="review-field">最高置信度 (%)<input type="number" x-model="filters.max" min="0" max="100" step="0.01" required :disabled="busy"></label>
+      <label class="review-field">标注状态<select x-model="filters.review" :disabled="busy"><option value="all">全部状态</option><option value="pending">未标注</option><option value="reviewed">已标注</option></select></label>
+      <label class="review-field">排序<select x-model="filters.sort" :disabled="busy"><option value="newest">最新识别优先</option><option value="oldest">最早识别优先</option><option value="confidence_asc">置信度从低到高</option><option value="confidence_desc">置信度从高到低</option></select></label>
+      <button class="review-button review-primary" type="submit" :disabled="busy" x-text="view === 'review' ? '开始本轮标注' : '应用筛选'"></button>
+    </form>
+    <div class="review-error" role="alert" x-show="error" x-text="error"></div>
+    <div class="review-notice" role="status" x-show="notice" x-text="notice"></div>
+    <div class="review-empty" x-show="loading" role="status">正在加载识别记录…</div>
+
+    <section x-show="view === 'list' && !loading" aria-label="识别图片列表">
+      <div class="review-empty" x-show="!items.length && !error"><h2>没有符合条件的记录</h2><p>调整筛选条件，或通过 API 提交带 URL 的图片后再查看。</p></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+        <template x-for="record in items" :key="record.id">
+          <article class="review-card">
+            <div class="review-photo"><img x-show="imageSource(record)" :src="imageSource(record) || undefined" @error="brokenImages[record.id] = true" loading="lazy" referrerpolicy="no-referrer" :alt="`识别图片 ${record.id}`"><span x-show="!imageSource(record)">图片暂不可用</span></div>
+            <div class="review-card-body"><div class="review-card-title"><span x-text="labelTitle(record.label)"></span><strong x-text="percent(record.confidence)"></strong></div><p><span class="review-badge" x-text="record.correction ? `人工：${labelTitle(record.correction)}` : '未标注'"></span></p><p x-text="dateLabel(record.created_at)"></p><a class="review-source" :href="safeImageURL(record.url) || undefined" target="_blank" rel="noopener noreferrer" :title="record.url" x-text="record.url"></a><a class="review-button" :href="reviewHref(record)" x-text="record.correction ? '查看 / 修改标注' : '纠错标注'"></a></div>
+          </article>
+        </template>
+      </div>
+      <div class="review-pagination"><span x-text="`第 ${pageNumber} 页 · 本页 ${items.length} 张`"></span><div class="review-actions"><button type="button" class="review-button" @click="previousPage()" :disabled="busy || pageNumber <= 1">上一页</button><button type="button" class="review-button" @click="nextPage()" :disabled="busy || !hasMore">下一页</button></div></div>
+    </section>
+
+    <section x-show="view === 'review' && !loading" aria-label="单图纠错标注" :aria-busy="saving">
+      <p class="review-progress" x-text="`本轮已标注 ${reviewedCount} 张 · 保存后自动切换下一张`"></p>
+      <button x-show="error && !current" type="button" class="review-button" @click="loadPage(reviewCursor)" :disabled="busy">重试加载</button>
+      <div class="review-empty" x-show="!current && !error"><h2>本轮范围已浏览完成</h2><p>可调整筛选范围，或点击「开始本轮标注」重新检查跳过的图片。</p></div>
+      <template x-if="current">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="review-single"><img x-show="currentImage" :src="currentImage || undefined" @error="brokenImages[current.id] = true" referrerpolicy="no-referrer" alt="当前待纠错的图片"><span x-show="!currentImage">图片无法加载，可跳过此图继续标注。</span></div>
+          <aside class="review-aside"><h2>这张图片的正确类型是？</h2><div class="review-detail"><p>记录 #<span x-text="current.id"></span> · <span x-text="dateLabel(current.created_at)"></span></p><p>模型预测：<strong x-text="labelTitle(current.label)"></strong> · <strong x-text="percent(current.confidence)"></strong></p><p x-show="current.correction">现有人工标签：<strong x-text="labelTitle(current.correction)"></strong> · <span x-text="current.reviewer"></span></p><p>模型 SHA-256：<span x-text="current.model_sha256"></span></p><a :href="safeImageURL(current.url) || undefined" target="_blank" rel="noopener noreferrer" x-text="current.url"></a></div>
+            <div class="review-labels">{{ range .labels }}<button type="button" class="review-button review-primary" data-label="{{ . }}" @click="annotate($el.dataset.label)" :disabled="busy || !currentImage" x-text="`${labelTitle($el.dataset.label)} · 保存并下一张`"></button>{{ end }}</div>
+            <div class="review-actions"><button type="button" class="review-button" @click="nextImage()" :disabled="busy">跳过此图</button><button type="button" class="review-button" @click="reloadCurrent()" :disabled="busy">重新加载记录</button></div>
+          </aside>
+        </div>
+      </template>
+    </section>
+  </div>
+</main>
+{{ end }}

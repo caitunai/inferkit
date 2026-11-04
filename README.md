@@ -4,6 +4,7 @@ The project template of Golang.
 ## Image Filter
 
 - [第三方图片分类 API 接入文档](docs/IMAGE_FILTER_API.md)
+- [识别结果采集、筛选列表与逐张人工纠错](docs/IMAGE_REVIEW.md)
 - [Go CPU 部署、CLI 和浏览器检测工作台](docs/GO_ONNX_SERVER.md)
 - [ONNX 模型部署协议](docs/ONNX_DEPLOYMENT.md)
 
@@ -417,7 +418,7 @@ atlas version
 All Atlas subcommands keep their original syntax:
 
 ```bash
-atlas migrate diff create_users --env local
+atlas migrate diff add_image_predictions --env local
 atlas migrate apply --env local
 atlas schema inspect --env local
 ```
@@ -447,14 +448,14 @@ prefix="ifk"
 
 Changing `db.table.prefix` does not automatically rename the tables declared
 in Atlas. Before running `atlas migrate diff`, update every table definition in
-both `atlas/schema/auth.hcl` and `atlas/schema/config_center.hcl` to use the new
-prefix. GORM adds an underscore when a non-empty prefix does not already end in
-one, so `prefix="ifk"` corresponds to Atlas table names such as `ifk_users` and
-`ifk_config_namespaces`.
+all active files in `atlas/schema/` (`config_center.hcl` and `image_review.hcl`)
+to use the new prefix. GORM adds an underscore when a non-empty prefix does not
+already end in one, so `prefix="ifk"` corresponds to Atlas table names such as
+`ifk_image_predictions` and `ifk_config_namespaces`.
 
 Also update HCL references that contain the table label, such as
-`table.ifk_config_namespaces.column.id`. Do not generate a migration until both
-schema files, their references, and the configured prefix agree. If the
+`table.ifk_config_namespaces.column.id`. Do not generate a migration until all
+active schema files, their references, and the configured prefix agree. If the
 generated SQL unexpectedly drops and recreates many tables, stop and check the
 prefixes before validating or applying the migration.
 
@@ -502,10 +503,10 @@ atlas migrate apply --env prod --baseline 20251120060720
 
 ## 6. Create and Apply New Migrations
 
-After baseline setup, create new schema migrations. For example, to add auth-related tables:
+After baseline setup, create new schema migrations for changes to the active schema:
 
 ```bash
-atlas migrate diff create_auth_tables --env prod
+atlas migrate diff update_image_review --env prod
 ```
 
 If the migration must insert default, lookup, or other initialization data,

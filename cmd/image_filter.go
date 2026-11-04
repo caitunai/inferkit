@@ -36,7 +36,9 @@ func init() {
 func serveImageFilter(cmd *cobra.Command, _ []string) error {
 	return withImageFilter(func(service *imagefilter.Service) error {
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
-		s.ImageFilter = service
+		if err := configureImageServer(cmd.Context(), s, service); err != nil {
+			return err
+		}
 		s.Start(cmd.Context())
 		return nil
 	})

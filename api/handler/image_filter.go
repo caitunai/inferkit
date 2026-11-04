@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,15 +24,24 @@ type ImageChecker interface {
 	Limits() (int64, time.Duration, int)
 }
 
+// ImageRecorder persists successful URL-associated results independently of inference caching.
+type ImageRecorder interface {
+	Save(context.Context, imagefilter.Result) error
+}
+
+// ErrImageResultSave identifies a failure to durably collect a URL result.
+var ErrImageResultSave = errors.New("save image prediction failed")
+
 // FilterImage accepts multipart file/url, JSON url, or form-encoded url.
-func FilterImage(service ImageChecker) base.HandlerFunc {
+func FilterImage(service ImageChecker, recorder ImageRecorder) base.HandlerFunc {
 	maxBytes, timeout, maxRequests := service.Limits()
-	h := &imageFilterHandler{service: service, admission: make(chan struct{}, maxRequests), maxBytes: maxBytes, timeout: timeout}
+	h := &imageFilterHandler{service: service, recorder: recorder, admission: make(chan struct{}, maxRequests), maxBytes: maxBytes, timeout: timeout}
 	return h.handle
 }
 
 type imageFilterHandler struct {
 	service   ImageChecker
+	recorder  ImageRecorder
 	admission chan struct{}
 	maxBytes  int64
 	timeout   time.Duration
@@ -67,10 +77,20 @@ func (h *imageFilterHandler) check(c *base.Context) {
 		imageFilterError(c, err)
 		return
 	}
+	if parsed, parseErr := url.Parse(source.URL); parseErr == nil {
+		c.Set(imageSourceHostKey, parsed.Hostname())
+	}
 	result, err := h.service.Check(c.Request.Context(), source)
 	if err != nil {
 		imageFilterError(c, err)
 		return
+	}
+	result.URL = source.URL
+	if source.URL != "" && h.recorder != nil {
+		if err = h.recorder.Save(c.Request.Context(), result); err != nil {
+			imageFilterError(c, errors.Join(ErrImageResultSave, err))
+			return
+		}
 	}
 	c.Success(gin.H{"result": result})
 }
@@ -158,10 +178,12 @@ func removeImageMultipart(c *base.Context) {
 
 func imageFilterError(c *base.Context, err error) {
 	status, message := imageFilterStatus(err)
-	if status == http.StatusInternalServerError {
-		log.Ctx(c.Request.Context()).Error().Err(err).Msg("image filter failed")
+	logImageFilterError(c, err, status)
+	data := gin.H{}
+	if code := imageFilterErrorCode(err); code != "" {
+		data["code"] = code
 	}
-	c.AbortWithStatusJSON(status, gin.H{base.KeyStatus: status, base.KeyMessage: message, base.KeyData: gin.H{}})
+	c.AbortWithStatusJSON(status, gin.H{base.KeyStatus: status, base.KeyMessage: message, base.KeyData: data})
 }
 
 func imageFilterStatus(err error) (int, string) {
@@ -169,6 +191,8 @@ func imageFilterStatus(err error) (int, string) {
 		return http.StatusRequestEntityTooLarge, "image request too large"
 	}
 	switch {
+	case errors.Is(err, ErrImageResultSave):
+		return http.StatusServiceUnavailable, "image result storage unavailable"
 	case errors.Is(err, imagefilter.ErrTooLarge):
 		return http.StatusRequestEntityTooLarge, "image too large"
 	case imageRequestTimedOut(err):

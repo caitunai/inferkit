@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"testing"
 
 	"github.com/spf13/viper"
@@ -14,23 +13,17 @@ import (
 
 const testImageBody = "abc"
 
-func TestURLSafety(t *testing.T) {
+func TestURLSyntax(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"file:///etc/passwd", "https://user:secret@example.com/image", "https://example.com/#fragment", "/local/path"} {
 		if err := validateURL(raw); !errors.Is(err, ErrURL) {
 			t.Errorf("accepted %q: %v", raw, err)
 		}
 	}
-	for _, raw := range []string{"127.0.0.1", "10.1.2.3", "169.254.169.254", "100.64.0.1", "::1", "::ffff:127.0.0.1", "fc00::1", "64:ff9b::7f00:1", "2002:7f00:1::"} {
-		if publicIP(netip.MustParseAddr(raw)) {
-			t.Errorf("accepted non-public IP %s", raw)
+	for _, raw := range []string{"http://127.0.0.1/image.png", "http://10.1.2.3/a", "https://198.18.0.69/a", "https://example.com/image.png"} {
+		if err := validateURL(raw); err != nil {
+			t.Errorf("valid HTTP(S) URL rejected: %s %v", raw, err)
 		}
-	}
-	if !publicIP(netip.MustParseAddr("8.8.8.8")) {
-		t.Fatal("rejected public IP")
-	}
-	if conn, err := publicDial(t.Context(), "tcp", "127.0.0.1:80"); conn != nil || !errors.Is(err, ErrURL) {
-		t.Fatalf("loopback dial: %v %v", conn, err)
 	}
 }
 
@@ -53,9 +46,6 @@ func TestDownloadResponseLimits(t *testing.T) {
 	c := Configuration(viper.New())
 	c.MaxBytes = 3
 	service := &Service{config: c, http: newDownloader(c)}
-	// Replace only the test transport so a local fixture server can stand in for
-	// the public network. Production publicDial rejection is tested separately.
-	service.http.SetTransport(server.Client().Transport)
 	t.Cleanup(service.http.GetClient().CloseIdleConnections)
 	data, err := service.readSource(t.Context(), Source{URL: server.URL + "/ok"})
 	if err != nil || string(data) != testImageBody {
@@ -67,6 +57,14 @@ func TestDownloadResponseLimits(t *testing.T) {
 	if _, err = service.readSource(t.Context(), Source{URL: server.URL + "/missing"}); !errors.Is(err, ErrDownload) {
 		t.Fatalf("download status: %v", err)
 	}
+	assertDownloadStatus(t, err)
+}
+
+func assertDownloadStatus(t *testing.T, err error) {
+	t.Helper()
+	if status, ok := errors.AsType[*DownloadStatusError](err); !ok || status.StatusCode != http.StatusNotFound || status.Host != "127.0.0.1" {
+		t.Fatalf("remote HTTP failure details lost: %v", err)
+	}
 }
 
 func TestSourceReaderTakesPrecedence(t *testing.T) {
@@ -76,7 +74,7 @@ func TestSourceReaderTakesPrecedence(t *testing.T) {
 	if err != nil || string(data) != testImageBody {
 		t.Fatalf("uploaded file must win: %q %v", data, err)
 	}
-	if _, err = readLimited(bytes.NewBufferString("abcd"), 3); !errors.Is(err, ErrTooLarge) {
+	if _, err = readLimited(bytes.NewBufferString("abcd"), 3, ErrInput); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("size limit: %v", err)
 	}
 }

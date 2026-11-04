@@ -214,7 +214,7 @@ export function createImageFilterApp(browser = window) {
         const payload = await response.json().catch(() => null);
         if (!response.ok || payload?.status !== 0) {
           if ([401, 403].includes(response.status)) { this.forgetToken(); this.accessOpen = true; }
-          throw new Error(responseMessage(response.status));
+          throw new Error(responseMessage(response.status, payload?.data?.code));
         }
         entry.result = readResult(payload.data?.result);
       } catch (error) {
@@ -237,11 +237,15 @@ export function createImageFilterApp(browser = window) {
   };
 }
 
-function responseMessage(status) {
+function responseMessage(status, code) {
+  const specific = {
+    image_url_dns_failed: "服务器无法解析图片域名，请检查服务器 DNS 或网络连接。",
+  }[code];
+  if (specific) return specific;
   return ({
-    400: "图片无法解码，或 URL 不合法、无法访问公网。", 401: "访问凭证已失效，请更新 API Token。",
+    400: "图片无法解码，或 URL 格式不正确。", 401: "访问凭证已失效，请更新 API Token。",
     403: "访问验证未通过，请检查 API Token 及其权限。", 408: "检测超时，请稍后重试。",
     413: "图片文件或像素尺寸超过服务限制。", 429: "检测服务繁忙，请稍后重试。",
-    502: "无法下载图片，请检查地址是否可以公开访问。", 503: "检测服务暂不可用，请稍后重试。",
+    502: "服务器无法下载图片，请检查地址、网络连接或访问权限。", 503: "检测服务暂不可用，请稍后重试。",
   })[status] || "检测失败，请稍后重试。";
 }

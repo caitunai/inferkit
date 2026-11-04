@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run test:config && npm run test:image-filter && vite build && npm run verify:css && npm run verify:bundle",
+    "build": "npm run test:config && npm run test:image-filter && npm run test:image-review && vite build && npm run verify:css && npm run verify:bundle",
+    "test:image-review": "node --test src/image-review/*.test.js",
     "test:image-filter": "node --test src/image-filter/*.test.js",
     "test:config": "node --test src/config-center/*.test.js",
     "verify:css": "node scripts/verify-template-css.mjs",

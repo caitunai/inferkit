@@ -28,8 +28,12 @@ var (
 	ErrInput = errors.New("invalid image input")
 	// ErrTooLarge indicates an encoded size or decoded pixel limit violation.
 	ErrTooLarge = errors.New("image exceeds configured limit")
-	// ErrURL indicates an unsupported URL or non-public destination.
-	ErrURL = errors.New("invalid or forbidden image URL")
+	// ErrURL indicates an unsupported URL syntax or protocol.
+	ErrURL = errors.New("invalid image URL")
+	// ErrDNS identifies failed or empty image-host DNS resolution.
+	ErrDNS = errors.New("image host DNS resolution failed")
+	// ErrPreprocess identifies decoding, orientation, resizing or tensor preparation failures.
+	ErrPreprocess = errors.New("image preprocessing failed")
 	// ErrDownload indicates an unsuccessful HTTP fetch.
 	ErrDownload = errors.New("image download failed")
 	// ErrBusy indicates that all admission slots are occupied.
