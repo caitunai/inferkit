@@ -83,6 +83,8 @@ Token 单独保存在本站点的 `localStorage`，点击「访问设置 → 保
 
 页面仅在模型配置有效且服务初始化成功时注册；推理继续使用原来的 `POST /api/image/filter` 和鉴权规则。开发时仍可用 `ui.assetMode="vite"` 配合 `npm run dev`。
 
+生产构建的 CSS / JS 使用 `/assets/...` 同源路径，浏览器沿用页面的协议、域名和端口。HTTPS 在反向代理处终止、代理通过 HTTP 连接 Go 服务时，资源仍通过外部 HTTPS 地址加载，无需为静态资源单独配置协议。更新 Go 代码后需重新构建并部署二进制；页面模板和资源地址生成逻辑由服务端提供。
+
 本机已验证 `onnxruntime_go v1.38.0`、`golang.org/x/image v0.47.0` 与 ONNX Runtime 1.31.1 的组合：原始张量和图片 fixtures、实际 API、并发和取消测试均通过。公网 URL 若被本机代理的 Fake-IP DNS 解析到 `198.18.0.0/15` 等特殊网段，会被 SSRF 防护拒绝；应让下载服务使用真实公网 DNS 结果，保留目标地址安全校验。
 
 ### 请求格式

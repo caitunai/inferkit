@@ -97,7 +97,7 @@ func (c *Context) Origin() string {
 	return fmt.Sprintf("%s://%s:%s", scheme, c.Request.Host, port)
 }
 
-// GetCSSJsFiles returns css js files.
+// GetCSSJsFiles returns root-relative asset paths resolved against the browser's origin.
 func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
 	if viper.GetString("ui.assetMode") == "vite" {
 		return css, js
@@ -105,12 +105,11 @@ func (c *Context) GetCSSJsFiles(entry string) (css, js []string) {
 	manifest := storage.ParseManifest()
 	css = manifest.GetCSSFiles(entry)
 	js = manifest.GetJsFiles(entry)
-	prefix := c.Origin()
 	for i, v := range css {
-		css[i] = prefix + "/" + v
+		css[i] = "/" + v
 	}
 	for i, v := range js {
-		js[i] = prefix + "/" + v
+		js[i] = "/" + v
 	}
 	return css, js
 }
