@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{ .title }}</title>
+  {{ if .use_vite }}
+  <script type="module" src="{{ .vite_origin }}/@vite/client"></script>
+  <script type="module" src="{{ .vite_origin }}/{{ .entry }}"></script>
+  {{ else }}
+  {{ range .css_files }}<link rel="stylesheet" href="{{ . }}">{{ end }}
+  {{ range .js_files }}<script type="module" src="{{ . }}"></script>{{ end }}
+  {{ end }}
+</head>
+<body>
+  {{ template "content" . }}
+</body>
+</html>

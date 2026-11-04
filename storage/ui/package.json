@@ -1,0 +1,19 @@
+{
+  "name": "go-blueprint-ui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run test:config && vite build && npm run verify:css && npm run verify:bundle",
+    "test:config": "node --test src/config-center/*.test.js",
+    "verify:css": "node scripts/verify-template-css.mjs",
+    "verify:bundle": "node scripts/verify-config-center-bundle.mjs"
+  },
+  "dependencies": {
+    "@pierre/diffs": "^1.2.12",
+    "@tailwindcss/vite": "^4.3.3",
+    "alpinejs": "^3.15.12",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.2.0"
+  }
+}

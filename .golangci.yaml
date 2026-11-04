@@ -1,0 +1,191 @@
+version: "2"
+
+run:
+  concurrency: 0
+  issues-exit-code: 1
+  tests: true
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  # Keep the list explicit so golangci-lint upgrades cannot silently change policy.
+  default: none
+  enable:
+    # Correctness, error handling, and resource lifetime.
+    - bodyclose
+    - contextcheck
+    - durationcheck
+    - err113
+    - errcheck
+    - errchkjson
+    - errname
+    - errorlint
+    - govet
+    - ineffassign
+    - makezero
+    - nilerr
+    - nilnesserr
+    - nilnil
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - wastedassign
+    - wrapcheck
+
+    # Security and API boundaries.
+    - asciicheck
+    - bidichk
+    - canonicalheader
+    - containedctx
+    - forcetypeassert
+    - gosec
+    - noctx
+
+    # Maintainability and consistent design.
+    - asasalint
+    - cyclop
+    - depguard
+    - dogsled
+    - dupl
+    - exhaustive
+    - funlen
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - gocognit
+    - goconst
+    - gocritic
+    - godox
+    - interfacebloat
+    - maintidx
+    - musttag
+    - nakedret
+    - nestif
+    - nolintlint
+    - predeclared
+    - recvcheck
+    - revive
+    - thelper
+    - tparallel
+    - unparam
+    - unqueryvet
+    - zerologlint
+
+    # Modern Go and standard-library simplifications.
+    - copyloopvar
+    - exptostd
+    - fatcontext
+    - intrange
+    - mirror
+    - modernize
+    - nosprintfhostport
+    - perfsprint
+    - usestdlibvars
+    - usetesting
+
+    # Source and prose hygiene.
+    - dupword
+    - forbidigo
+    - goprintffuncname
+    - misspell
+    - whitespace
+
+  settings:
+    depguard:
+      rules:
+        main:
+          list-mode: strict
+          files:
+            - $all
+          allow:
+            - $gostd
+            - github.com/caitun/inferkit
+            - github.com/rs/zerolog
+            - github.com/spf13/viper
+            - github.com/gin-gonic/gin
+            - github.com/redis/go-redis
+            - github.com/go-redis/cache
+            - github.com/go-resty/resty
+            - github.com/spf13/cobra
+            - github.com/gin-contrib
+            - github.com/golang-jwt/jwt
+            - github.com/ThreeDotsLabs/watermill
+            - github.com/ThreeDotsLabs/watermill-redisstream
+            - github.com/ThreeDotsLabs/watermill/message
+            - golang.org/x/sync/errgroup
+            - gorm.io/driver
+            - gorm.io/gorm
+            - ariga.io/atlas/atlasexec
+            - github.com/joho/godotenv
+          deny:
+            - pkg: reflect
+              desc: Prefer type-safe code over reflection.
+            - pkg: github.com/pkg/errors
+              desc: Use the standard library errors package.
+    dupl:
+      # The upstream default is 150 tokens; detect smaller duplicated blocks.
+      threshold: 100
+    errcheck:
+      # Do not silently discard errors from type assertions, blank assignments,
+      # or functions in errcheck's built-in exclusion list.
+      check-type-assertions: true
+      check-blank: true
+      disable-default-exclusions: true
+    gochecksumtype:
+      # A default branch must not hide an unhandled sum-type member.
+      default-signifies-exhaustive: false
+    gocognit:
+      # Golangci-lint recommends 10-20; use the strict end of that range.
+      min-complexity: 10
+    goconst:
+      # Extend the default repeated-string checks to numeric constants and
+      # equivalent constant expressions.
+      numbers: true
+      max: 1000
+      find-duplicates: true
+      eval-const-expressions: true
+    govet:
+      enable-all: true
+      settings:
+        shadow:
+          strict: true
+    interfacebloat:
+      max: 5
+    nakedret:
+      # Named return values remain valid, but implicit bare returns do not.
+      max-func-lines: 0
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    staticcheck:
+      checks:
+        - all
+
+  exclusions:
+    generated: strict
+    warn-unused: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  uniq-by-line: false
+  new: false
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/caitunai/go-blueprint
+      extra:
+        group-params: true
+        clothe-returns: true
+        balance-calls: true
+    goimports:
+      local-prefixes:
+        - github.com/caitunai/go-blueprint
+  exclusions:
+    generated: strict
+    warn-unused: true

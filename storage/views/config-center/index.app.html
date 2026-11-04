@@ -1,0 +1,628 @@
+{{ define "content" }}
+<main x-data="configCenterApp()" class="min-h-screen bg-slate-50 text-slate-900" @beforeunload.window="handleBeforeUnload($event)" @popstate.window="handlePopState()" x-cloak>
+  <header class="border-b border-slate-200 bg-white">
+    <div class="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6">
+      <div class="config-header-context flex min-w-0 items-center gap-2 sm:gap-3">
+        <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-indigo-600 text-white shadow-sm" title="配置中心" aria-label="配置中心">
+          <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M6 7v4.5A4.5 4.5 0 0 0 10.5 16H16M6 10h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="6" cy="5" r="2.25" fill="currentColor"/>
+            <circle cx="18" cy="10" r="2.25" fill="currentColor"/>
+            <circle cx="18" cy="16" r="2.25" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="namespace-switcher" @click.outside="namespaceMenu = false" @keydown.escape.stop="namespaceMenu = false">
+          <button
+            type="button"
+            class="namespace-switcher-trigger"
+            aria-haspopup="listbox"
+            :aria-expanded="namespaceMenu"
+            :disabled="loadingNamespaces"
+            @click="namespaceMenu = !namespaceMenu"
+          >
+            <span class="namespace-switcher-label">
+              <small>命名空间</small>
+              <strong x-text="selectedNamespace ? selectedNamespace.name : loadingNamespaces ? '加载中…' : '请选择命名空间'"></strong>
+            </span>
+            <code x-show="selectedNamespace" x-text="selectedNamespace?.slug"></code>
+            <span class="dropdown-arrow" :class="namespaceMenu && 'dropdown-arrow-open'" aria-hidden="true"></span>
+          </button>
+          <div x-show="namespaceMenu" x-transition.origin.top.left class="namespace-switcher-menu" role="listbox" aria-label="切换命名空间">
+            <div class="select-menu-scroll">
+              <template x-for="namespace in namespaces" :key="namespace.id">
+                <button
+                  type="button"
+                  class="namespace-switcher-option"
+                  :class="selectedNamespaceID === namespace.id && 'namespace-switcher-option-selected'"
+                  role="option"
+                  :aria-selected="selectedNamespaceID === namespace.id"
+                  @click="selectNamespace(namespace.id)"
+                >
+                  <span class="min-w-0 flex-1">
+                    <strong class="block truncate" x-text="namespace.name"></strong>
+                    <span class="mt-0.5 flex items-center gap-2 text-[11px] text-slate-400"><code x-text="namespace.slug"></code><span x-text="`${namespace.environment_count} 个环境`"></span></span>
+                  </span>
+                  <span x-show="selectedNamespaceID === namespace.id" class="font-bold text-indigo-600" aria-hidden="true">✓</span>
+                </button>
+              </template>
+              <div x-show="!loadingNamespaces && namespaces.length === 0" class="px-3 py-5 text-center text-xs text-slate-400">还没有命名空间</div>
+            </div>
+            <div class="namespace-switcher-footer">
+              <button x-show="selectedNamespace" type="button" @click="openNamespaceModal(selectedNamespace)"><span aria-hidden="true">✎</span> 编辑</button>
+              <button type="button" @click="openNamespaceModal()"><span aria-hidden="true">＋</span> 新建</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="config-header-actions ml-auto flex shrink-0 items-center gap-3">
+        <button type="button" class="btn-secondary" :disabled="!selectedNamespaceID" @click="openEnvironmentModal()">新建环境</button>
+        <button type="button" class="btn-primary" :disabled="publishing || publishIDs.length === 0" @click="publishSelected()">
+          <span x-show="!publishing">发布所选环境</span>
+          <span x-show="publishing">发布中…</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div
+    class="mx-auto grid max-w-[1600px] grid-cols-1 transition-[grid-template-columns] duration-200"
+    :class="sidebarHidden ? 'lg:grid-cols-1' : 'lg:grid-cols-[300px_minmax(0,1fr)]'"
+  >
+    <aside x-show="!sidebarHidden" class="border-b border-slate-200 bg-white lg:min-h-[calc(100vh-73px)] lg:border-b-0 lg:border-r">
+      <div class="flex items-center justify-between px-5 pb-3 pt-5">
+        <div>
+          <h2 class="text-sm font-semibold">配置环境</h2>
+          <p class="mt-1 text-xs text-slate-500" x-text="`${environments.length} 个环境`"></p>
+        </div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="icon-button" title="刷新" aria-label="刷新环境列表" @click="loadEnvironments()">↻</button>
+          <button type="button" class="icon-button" title="隐藏环境列表" aria-label="隐藏环境列表" :aria-expanded="!sidebarHidden" @click="setSidebarHidden(true)">‹</button>
+        </div>
+      </div>
+
+      <div class="environment-tree-list pb-5 pl-1 pr-3">
+        <template x-if="loadingEnvironments">
+          <div class="space-y-2 p-2">
+            <div class="skeleton h-20"></div><div class="skeleton h-20"></div><div class="skeleton h-20"></div>
+          </div>
+        </template>
+        <template x-if="!loadingEnvironments && selectedNamespaceID && environments.length === 0">
+          <button type="button" class="empty-state" @click="openEnvironmentModal()">
+            <span class="text-2xl">＋</span>
+            <strong>创建第一个环境</strong>
+            <span>例如 base、dev 或 production</span>
+          </button>
+        </template>
+        <template x-if="!loadingNamespaces && !selectedNamespaceID">
+          <button type="button" class="empty-state" @click="openNamespaceModal()">
+            <span class="text-2xl">＋</span>
+            <strong>创建命名空间</strong>
+            <span>先为配置环境建立隔离空间</span>
+          </button>
+        </template>
+        <template x-for="row in environmentTreeRows" :key="row.environment.id">
+          <div
+            class="environment-tree-row"
+            :style="`--tree-track: ${9 + row.depth * 17}px; --tree-node: ${26 + row.depth * 17}px; --tree-card: ${38 + row.depth * 17}px`"
+          >
+            <div class="environment-tree-lines" aria-hidden="true">
+              <template x-for="(continues, level) in row.ancestorContinuations" :key="level">
+                <span class="environment-tree-rail" :class="continues ? '' : 'environment-tree-rail-hidden'" :style="`left: ${9 + level * 17}px`"></span>
+              </template>
+              <span x-show="row.hasPrevious" class="environment-tree-current-upper"></span>
+              <span x-show="!row.isLast" class="environment-tree-current-lower"></span>
+              <span x-show="row.hasChildren" class="environment-tree-child-lower"></span>
+              <span x-show="!row.virtual" class="environment-tree-connector"></span>
+              <span
+                class="environment-tree-dot"
+                :class="row.virtual ? 'environment-tree-dot-root' : selectedID === row.environment.id ? 'environment-tree-dot-active' : ''"
+              ></span>
+            </div>
+            <div
+              class="environment-card"
+              :class="row.virtual ? 'environment-root-card' : selectedID === row.environment.id ? 'environment-card-active' : ''"
+            >
+              <template x-if="row.virtual">
+                <div class="flex min-w-0 flex-1 items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-semibold text-slate-700" x-text="row.environment.name"></div>
+                    <div class="mt-1 text-xs text-slate-400">所有顶级环境的只读根节点</div>
+                  </div>
+                  <span class="environment-root-badge">只读</span>
+                </div>
+              </template>
+              <template x-if="!row.virtual">
+                <button type="button" class="min-w-0 flex-1 text-left" @click="selectEnvironment(row.environment.id)">
+                  <div class="flex items-center gap-2">
+                    <span class="truncate text-sm font-medium" x-text="row.environment.name"></span>
+                    <span class="version-badge" x-text="row.environment.published_version ? `v${row.environment.published_version}` : '未发布'"></span>
+                  </div>
+                  <div class="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                    <code x-text="row.environment.slug"></code>
+                    <template x-if="row.environment.parent_id">
+                      <span class="truncate" x-text="`继承 ${environmentName(row.environment.parent_id)}`"></span>
+                    </template>
+                  </div>
+                </button>
+              </template>
+              <template x-if="!row.virtual">
+                <label class="publish-check" :title="publishIDs.includes(row.environment.id) ? '已加入发布列表' : '加入发布列表'">
+                  <input type="checkbox" :value="row.environment.id" x-model.number="publishIDs">
+                  <span aria-hidden="true"></span>
+                </label>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+    </aside>
+
+    <section class="min-w-0 p-4 sm:p-6 lg:p-8">
+      <div x-show="sidebarHidden" x-transition.opacity class="mb-4">
+        <button type="button" class="sidebar-restore-button" aria-label="显示环境列表" :aria-expanded="!sidebarHidden" @click="setSidebarHidden(false)">
+          <span class="text-lg leading-none" aria-hidden="true">☰</span>
+          <span>显示环境列表</span>
+        </button>
+      </div>
+      <template x-if="!selectedNamespaceID && !loadingNamespaces">
+        <div class="grid min-h-[65vh] place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+          <div>
+            <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-2xl text-indigo-600">◇</div>
+            <h2 class="mt-4 text-lg font-semibold">创建第一个命名空间</h2>
+            <p class="mt-2 max-w-md text-sm leading-6 text-slate-500">命名空间用于隔离不同项目或业务的配置环境。</p>
+            <button type="button" class="btn-primary mt-5" @click="openNamespaceModal()">＋ 新建命名空间</button>
+          </div>
+        </div>
+      </template>
+      <template x-if="selectedNamespaceID && !selectedID && !loadingEnvironments">
+        <div class="grid min-h-[65vh] place-items-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
+          <div>
+            <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-indigo-50 text-2xl text-indigo-600">⌘</div>
+            <h2 class="mt-4 text-lg font-semibold">创建第一个配置环境</h2>
+            <p class="mt-2 max-w-md text-sm leading-6 text-slate-500">每个环境只需维护自己的差异项，系统会自动合并父环境配置。</p>
+            <button type="button" class="btn-primary mt-5" @click="openEnvironmentModal()">＋ 新建环境</button>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="selectedID">
+        <div>
+          <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+            <div class="min-w-0">
+              <div class="flex items-center gap-3">
+                <h2 class="truncate text-2xl font-semibold tracking-tight" x-text="selectedEnvironment?.name"></h2>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-1 text-xs text-slate-500">
+                <template x-for="(item, index) in inheritanceChain" :key="item.id">
+                  <span class="flex items-center gap-1">
+                    <span class="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1">
+                      <span x-text="item.name"></span>
+                      <code class="border-l border-slate-200 pl-1.5 text-slate-400" x-text="item.slug"></code>
+                    </span>
+                    <span x-show="index < inheritanceChain.length - 1">→</span>
+                  </span>
+                </template>
+              </div>
+              <p class="mt-2 text-sm text-slate-500" x-text="selectedEnvironment?.description || '暂无环境说明'"></p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="btn-ghost" @click="openEnvironmentModal(selectedEnvironment)">编辑环境</button>
+              <button type="button" class="btn-danger-ghost" @click="deleteSelectedEnvironment()">删除</button>
+            </div>
+          </div>
+
+          <nav class="tab-bar" aria-label="配置环境视图">
+            <button type="button" class="tab-button" :class="tab === 'draft' && 'tab-button-active'" @click="tab = 'draft'">本环境覆盖</button>
+            <button type="button" class="tab-button" :class="tab === 'final' && 'tab-button-active'" @click="tab = 'final'">最终完整配置</button>
+            <button type="button" class="tab-button" :class="tab === 'published' && 'tab-button-active'" @click="openPublishedTab()">已发布版本</button>
+            <button type="button" class="tab-button" :class="tab === 'compare' && 'tab-button-active'" @click="openCompareTab()">环境对比</button>
+          </nav>
+
+          <div class="tab-content">
+
+          <template x-if="loadingConfig">
+            <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]"><div class="skeleton h-96"></div><div class="skeleton h-96"></div></div>
+          </template>
+
+          <template x-if="!loadingConfig && tab === 'draft'">
+            <div class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div class="panel min-w-0">
+                <div class="panel-header">
+                  <div>
+                    <h3 class="font-semibold">覆盖项编辑器</h3>
+                    <p class="mt-1 text-xs text-slate-500">这里只保存当前环境与父环境不同的部分</p>
+                  </div>
+                  <button type="button" class="btn-primary" :disabled="saving || !dirty" @click="saveDraft()" x-text="saving ? '保存中…' : dirty ? '保存草稿' : '已保存'"></button>
+                </div>
+                <div class="p-4 sm:p-5">
+                  <div x-ref="treeEditor" class="min-w-0"></div>
+                </div>
+              </div>
+              <div class="panel sticky top-5">
+                <div class="panel-header">
+                  <div><h3 class="font-semibold">实时合并预览</h3><p class="mt-1 text-xs text-slate-500">父环境 + 当前未保存草稿</p></div>
+                  <div class="flex items-center gap-2">
+                    <div class="format-select" @click.outside="formatMenu = ''" @keydown.escape.stop="formatMenu = ''">
+                      <button type="button" class="format-select-trigger" aria-haspopup="listbox" :aria-expanded="formatMenu === 'preview'" @click="formatMenu = formatMenu === 'preview' ? '' : 'preview'">
+                        <span x-text="formatLabel(displayFormat)"></span><span class="dropdown-arrow" :class="formatMenu === 'preview' && 'dropdown-arrow-open'"></span>
+                      </button>
+                      <div x-show="formatMenu === 'preview'" x-transition.origin.top.right class="format-select-menu" role="listbox">
+                        <div class="select-menu-scroll"><template x-for="format in configFormats" :key="format.value"><button type="button" class="custom-select-option" :class="displayFormat === format.value && 'custom-select-option-selected'" @click="selectFormat(format.value)" x-text="format.label"></button></template></div>
+                      </div>
+                    </div>
+                    <span class="status-dot" :class="dirty ? 'status-dot-warn' : 'status-dot-ok'" x-text="dirty ? '未保存' : '已同步'"></span>
+                  </div>
+                </div>
+                <div class="panel-content-clip">
+                  <template x-if="!finalConfigEmpty"><pre class="config-preview" x-text="formattedFinal"></pre></template>
+                  <template x-if="finalConfigEmpty">
+                    <div class="config-empty-state">
+                      <div><div class="config-empty-state-icon">＋</div><h4>还没有配置项</h4><p>在左侧覆盖项编辑器中添加字段，实时预览会立即显示合并结果。</p></div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="!loadingConfig && tab === 'final'">
+            <div class="panel">
+              <div class="panel-header">
+                <div><h3 class="font-semibold">最终完整配置</h3><p class="mt-1 text-xs text-slate-500">按继承链递归合并后的草稿态结果</p></div>
+                <div class="flex items-center gap-2">
+                  <div class="format-select" @click.outside="formatMenu = ''" @keydown.escape.stop="formatMenu = ''">
+                    <button type="button" class="format-select-trigger" aria-haspopup="listbox" :aria-expanded="formatMenu === 'final'" @click="formatMenu = formatMenu === 'final' ? '' : 'final'"><span x-text="formatLabel(displayFormat)"></span><span class="dropdown-arrow" :class="formatMenu === 'final' && 'dropdown-arrow-open'"></span></button>
+                    <div x-show="formatMenu === 'final'" x-transition.origin.top.right class="format-select-menu" role="listbox"><div class="select-menu-scroll"><template x-for="format in configFormats" :key="format.value"><button type="button" class="custom-select-option" :class="displayFormat === format.value && 'custom-select-option-selected'" @click="selectFormat(format.value)" x-text="format.label"></button></template></div></div>
+                  </div>
+                  <button type="button" class="btn-secondary" :disabled="finalConfigEmpty" @click="copyText(formattedFinal)">复制配置</button>
+                </div>
+              </div>
+              <div class="panel-content-clip">
+                <template x-if="!finalConfigEmpty"><pre class="config-preview min-h-[480px]" x-text="formattedFinal"></pre></template>
+                <template x-if="finalConfigEmpty">
+                  <div class="config-empty-state config-empty-state-large">
+                    <div><div class="config-empty-state-icon">＋</div><h4>最终配置为空</h4><p>当前环境及其继承链都没有配置项，请先在“本环境覆盖”中添加配置。</p><button type="button" class="btn-secondary mt-5" @click="tab = 'draft'">前往添加配置</button></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="!loadingConfig && tab === 'published'">
+            <div class="panel">
+              <div class="panel-header">
+                <div>
+                  <h3 class="font-semibold">已发布版本</h3>
+                  <p class="mt-1 text-xs text-slate-500" x-text="publishedRelease ? `v${publishedRelease.version} · ${formatDate(publishedRelease.published_at)} · 批次 ${publishedRelease.batch_id}` : '该环境尚未发布'"></p>
+                </div>
+                <div x-show="publishedRelease" class="flex items-center gap-2">
+                  <div class="format-select" @click.outside="publishedVersionMenu = false" @keydown.escape.stop="publishedVersionMenu = false">
+                    <button type="button" class="format-select-trigger" aria-haspopup="listbox" :aria-expanded="publishedVersionMenu" @click="publishedVersionMenu = !publishedVersionMenu"><span x-text="`v${publishedVersion}`"></span><span class="dropdown-arrow" :class="publishedVersionMenu && 'dropdown-arrow-open'"></span></button>
+                    <div x-show="publishedVersionMenu" x-transition.origin.top.right class="format-select-menu published-version-menu" role="listbox"><div class="select-menu-scroll"><template x-for="release in publishedVersions" :key="release.version"><button type="button" class="custom-select-option published-version-option" :class="publishedVersion === release.version && 'custom-select-option-selected'" @click="loadPublished(release.version)" x-text="`v${release.version} · ${formatDate(release.published_at)}`"></button></template></div></div>
+                  </div>
+                  <div class="format-select" @click.outside="formatMenu = ''" @keydown.escape.stop="formatMenu = ''">
+                    <button type="button" class="format-select-trigger" aria-haspopup="listbox" :aria-expanded="formatMenu === 'published'" @click="formatMenu = formatMenu === 'published' ? '' : 'published'"><span x-text="formatLabel(displayFormat)"></span><span class="dropdown-arrow" :class="formatMenu === 'published' && 'dropdown-arrow-open'"></span></button>
+                    <div x-show="formatMenu === 'published'" x-transition.origin.top.right class="format-select-menu" role="listbox"><div class="select-menu-scroll"><template x-for="format in configFormats" :key="format.value"><button type="button" class="custom-select-option" :class="displayFormat === format.value && 'custom-select-option-selected'" @click="selectFormat(format.value)" x-text="format.label"></button></template></div></div>
+                  </div>
+                  <button type="button" class="btn-secondary" :disabled="publishedConfigEmpty" @click="copyText(formattedPublished)">复制配置</button>
+                </div>
+              </div>
+              <div x-show="!publishedLoading && publishedRelease" class="release-reason">
+                <div class="release-reason-header">
+                  <span>发布原因</span>
+                  <code x-text="publishedRelease ? `v${publishedRelease.version}` : ''"></code>
+                </div>
+                <p x-text="publishedRelease?.reason || '此历史版本未记录发布原因。'"></p>
+              </div>
+              <div class="panel-content-clip">
+                <template x-if="publishedLoading"><div class="skeleton m-5 h-80"></div></template>
+                <template x-if="!publishedLoading && publishedRelease && !publishedConfigEmpty"><pre class="config-preview min-h-[480px]" x-text="formattedPublished"></pre></template>
+                <template x-if="!publishedLoading && publishedRelease && publishedConfigEmpty">
+                  <div class="config-empty-state config-empty-state-large"><div><div class="config-empty-state-icon">✓</div><h4>该发布版本没有配置项</h4><p>这是一个有效的空配置快照，可以切换其他历史版本继续查看。</p></div></div>
+                </template>
+                <template x-if="!publishedLoading && !publishedRelease"><div class="grid min-h-80 place-items-center p-8 text-center text-sm text-slate-500">请勾选此环境并点击“发布所选环境”创建首个版本。</div></template>
+              </div>
+            </div>
+          </template>
+
+          <template x-if="!loadingConfig && tab === 'compare'">
+            <div class="space-y-5">
+              <div class="panel p-5">
+                <div class="flex flex-wrap items-start justify-between gap-4">
+                  <div><h3 class="font-semibold">配置环境对比</h3><p class="mt-1 text-xs text-slate-500">任意选择草稿最终配置或具体已发布版本；左侧为旧版本，右侧为新版本。</p></div>
+                  <div class="format-select" @click.outside="formatMenu = ''" @keydown.escape.stop="formatMenu = ''">
+                    <button type="button" class="format-select-trigger" aria-haspopup="listbox" :aria-expanded="formatMenu === 'compare'" @click="formatMenu = formatMenu === 'compare' ? '' : 'compare'"><span x-text="formatLabel(displayFormat)"></span><span class="dropdown-arrow" :class="formatMenu === 'compare' && 'dropdown-arrow-open'"></span></button>
+                    <div x-show="formatMenu === 'compare'" x-transition.origin.top.right class="format-select-menu" role="listbox"><div class="select-menu-scroll"><template x-for="format in configFormats" :key="format.value"><button type="button" class="custom-select-option" :class="displayFormat === format.value && 'custom-select-option-selected'" @click="selectFormat(format.value)" x-text="format.label"></button></template></div></div>
+                  </div>
+                </div>
+                <div class="mt-5 grid gap-4 lg:grid-cols-2" @click.outside="comparisonMenu = ''" @keydown.escape.stop="comparisonMenu = ''">
+                  <div>
+                    <label class="field-label">左侧（旧配置）</label>
+                    <div class="custom-select mt-2">
+                      <button type="button" class="custom-select-trigger" aria-haspopup="listbox" :aria-expanded="comparisonMenu === 'left'" @click="comparisonMenu = comparisonMenu === 'left' ? '' : 'left'"><span class="truncate" x-text="comparisonSourceLabel(comparisonLeft)"></span><span class="dropdown-arrow" :class="comparisonMenu === 'left' && 'dropdown-arrow-open'"></span></button>
+                      <div x-show="comparisonMenu === 'left'" x-transition.origin.top class="custom-select-menu comparison-source-menu" role="listbox" aria-label="左侧对比来源">
+                        <div class="select-menu-scroll">
+                        <template x-for="row in comparisonSourceRows" :key="`left-row-${row.environment.id}`">
+                          <div
+                            class="comparison-tree-row"
+                            :style="`--comparison-track: ${8 + row.depth * 16}px; --comparison-node: ${24 + row.depth * 16}px; --comparison-card: ${36 + row.depth * 16}px`"
+                          >
+                            <div class="comparison-tree-lines" aria-hidden="true">
+                              <template x-for="(continues, level) in row.ancestorContinuations" :key="level">
+                                <span class="comparison-tree-rail" :class="continues ? '' : 'comparison-tree-rail-hidden'" :style="`left: ${8 + level * 16}px`"></span>
+                              </template>
+                              <span x-show="row.hasPrevious" class="comparison-tree-current-upper"></span>
+                              <span x-show="!row.isLast" class="comparison-tree-current-lower"></span>
+                              <span x-show="row.hasChildren" class="comparison-tree-child-lower"></span>
+                              <span x-show="!row.virtual" class="comparison-tree-connector"></span>
+                              <span class="comparison-tree-dot" :class="row.virtual ? 'comparison-tree-dot-root' : comparisonRowSelected(row, 'left') ? 'comparison-tree-dot-active' : ''"></span>
+                            </div>
+                            <div class="comparison-tree-card" :data-environment-slug="row.environment.slug" :class="row.virtual ? 'comparison-tree-root-card' : comparisonRowSelected(row, 'left') ? 'comparison-tree-card-active' : ''">
+                              <div class="comparison-tree-environment">
+                                <span class="truncate font-medium" x-text="row.environment.name"></span>
+                                <code x-show="!row.virtual" class="shrink-0 text-[11px] text-slate-400" x-text="row.environment.slug"></code>
+                                <span x-show="row.virtual" class="environment-root-badge">只读</span>
+                              </div>
+                              <div x-show="!row.virtual" class="comparison-tree-sources">
+                                <template x-for="source in row.sources" :key="`left-${source.value}`">
+                                  <button
+                                    type="button"
+                                    class="comparison-tree-source"
+                                    :class="comparisonLeft === source.value && 'comparison-tree-source-selected'"
+                                    role="option"
+                                    :aria-selected="comparisonLeft === source.value"
+                                    @click="selectComparisonSource('left', source.value)"
+                                  >
+                                    <span class="truncate" x-text="source.label"></span>
+                                    <span x-show="source.release" class="ml-auto shrink-0 text-[10px] text-slate-400" x-text="formatDate(source.release?.published_at)"></span>
+                                    <span x-show="comparisonLeft === source.value" class="comparison-tree-check" aria-hidden="true">✓</span>
+                                  </button>
+                                </template>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="field-label">右侧（新配置）</label>
+                    <div class="custom-select mt-2">
+                      <button type="button" class="custom-select-trigger" aria-haspopup="listbox" :aria-expanded="comparisonMenu === 'right'" @click="comparisonMenu = comparisonMenu === 'right' ? '' : 'right'"><span class="truncate" x-text="comparisonSourceLabel(comparisonRight)"></span><span class="dropdown-arrow" :class="comparisonMenu === 'right' && 'dropdown-arrow-open'"></span></button>
+                      <div x-show="comparisonMenu === 'right'" x-transition.origin.top class="custom-select-menu comparison-source-menu" role="listbox" aria-label="右侧对比来源">
+                        <div class="select-menu-scroll">
+                        <template x-for="row in comparisonSourceRows" :key="`right-row-${row.environment.id}`">
+                          <div
+                            class="comparison-tree-row"
+                            :style="`--comparison-track: ${8 + row.depth * 16}px; --comparison-node: ${24 + row.depth * 16}px; --comparison-card: ${36 + row.depth * 16}px`"
+                          >
+                            <div class="comparison-tree-lines" aria-hidden="true">
+                              <template x-for="(continues, level) in row.ancestorContinuations" :key="level">
+                                <span class="comparison-tree-rail" :class="continues ? '' : 'comparison-tree-rail-hidden'" :style="`left: ${8 + level * 16}px`"></span>
+                              </template>
+                              <span x-show="row.hasPrevious" class="comparison-tree-current-upper"></span>
+                              <span x-show="!row.isLast" class="comparison-tree-current-lower"></span>
+                              <span x-show="row.hasChildren" class="comparison-tree-child-lower"></span>
+                              <span x-show="!row.virtual" class="comparison-tree-connector"></span>
+                              <span class="comparison-tree-dot" :class="row.virtual ? 'comparison-tree-dot-root' : comparisonRowSelected(row, 'right') ? 'comparison-tree-dot-active' : ''"></span>
+                            </div>
+                            <div class="comparison-tree-card" :data-environment-slug="row.environment.slug" :class="row.virtual ? 'comparison-tree-root-card' : comparisonRowSelected(row, 'right') ? 'comparison-tree-card-active' : ''">
+                              <div class="comparison-tree-environment">
+                                <span class="truncate font-medium" x-text="row.environment.name"></span>
+                                <code x-show="!row.virtual" class="shrink-0 text-[11px] text-slate-400" x-text="row.environment.slug"></code>
+                                <span x-show="row.virtual" class="environment-root-badge">只读</span>
+                              </div>
+                              <div x-show="!row.virtual" class="comparison-tree-sources">
+                                <template x-for="source in row.sources" :key="`right-${source.value}`">
+                                  <button
+                                    type="button"
+                                    class="comparison-tree-source"
+                                    :class="comparisonRight === source.value && 'comparison-tree-source-selected'"
+                                    role="option"
+                                    :aria-selected="comparisonRight === source.value"
+                                    @click="selectComparisonSource('right', source.value)"
+                                  >
+                                    <span class="truncate" x-text="source.label"></span>
+                                    <span x-show="source.release" class="ml-auto shrink-0 text-[10px] text-slate-400" x-text="formatDate(source.release?.published_at)"></span>
+                                    <span x-show="comparisonRight === source.value" class="comparison-tree-check" aria-hidden="true">✓</span>
+                                  </button>
+                                </template>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="panel min-w-0 overflow-hidden">
+                <div x-show="comparisonLoading" class="skeleton m-5 h-96"></div>
+                <div x-show="comparisonError && !comparisonLoading" class="grid min-h-80 place-items-center p-8 text-sm text-rose-600" x-text="comparisonError"></div>
+                <div x-show="!comparisonError && !comparisonConfigsEmpty" x-ref="diffViewer" class="diff-viewer min-h-[480px]"></div>
+                <div x-show="!comparisonLoading && !comparisonError && comparisonConfigsEmpty" class="config-empty-state config-empty-state-large"><div><div class="config-empty-state-icon">＝</div><h4>两侧配置均为空</h4><p>当前选择的两个来源都没有配置项，因此没有可展示的差异。</p></div></div>
+              </div>
+            </div>
+          </template>
+          </div>
+        </div>
+      </template>
+    </section>
+  </div>
+
+  <footer class="config-center-footer" aria-labelledby="runtime-api-docs-title">
+    <div class="config-center-footer-inner">
+      <div>
+        <div class="config-center-footer-eyebrow">Runtime API</div>
+        <h2 id="runtime-api-docs-title">获取已发布配置</h2>
+        <p>通过命名空间 API Key 获取指定环境的最新已发布完整配置。草稿不会通过此接口返回，调用方应始终使用 HTTPS 保护请求头中的凭据。</p>
+        <div class="config-center-footer-formats" aria-label="支持的输出格式">
+          <code>json</code><code>yaml</code><code>toml</code><code>env</code><code>ini</code>
+        </div>
+      </div>
+      <div class="config-center-footer-docs">
+        <div class="config-center-footer-row">
+          <span class="config-center-footer-label">请求地址 · GET</span>
+          <code class="config-center-footer-code" x-text="runtimeAPIEndpoint"></code>
+          <p>请求头：<code class="text-slate-300">X-API-Key: &lt;namespace-api-key&gt;</code>。JSON 返回标准响应结构；其他格式直接返回文本，并以注释保留配置说明。</p>
+        </div>
+        <div class="config-center-footer-row">
+          <span class="config-center-footer-label">cURL 示例</span>
+          <pre class="config-center-footer-code" x-text="runtimeCurlExample"></pre>
+          <button type="button" class="config-center-footer-copy" @click="copyText(runtimeCurlExample)">复制命令</button>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <div x-show="namespaceModal" x-transition.opacity class="modal-backdrop" @keydown.escape.window="closeNamespaceModal()">
+    <section x-show="namespaceModal" x-transition class="modal-card" @click.outside="closeNamespaceModal()">
+      <div class="flex items-start justify-between gap-4">
+        <div><h2 class="text-lg font-semibold" x-text="namespaceForm.id ? '编辑命名空间' : '创建命名空间'"></h2><p class="mt-1 text-sm text-slate-500">命名空间用于隔离不同项目或业务的配置环境。</p></div>
+        <button type="button" class="icon-button" aria-label="关闭命名空间窗口" @click="closeNamespaceModal()">×</button>
+      </div>
+      <form class="mt-6 space-y-5" @submit.prevent="saveNamespace()">
+        <label class="field-label">命名空间名称<input class="text-input mt-2" maxlength="100" required x-model.trim="namespaceForm.name" placeholder="例如：订单服务"></label>
+        <label class="field-label">命名空间标识<input class="text-input mt-2 font-mono" maxlength="64" required x-model.trim="namespaceForm.slug" placeholder="order-service"><span class="field-help">全局唯一，小写字母开头，可包含数字、- 和 _</span></label>
+        <label class="field-label">API Key<input type="password" class="text-input mt-2 font-mono" minlength="32" maxlength="256" pattern="[A-Za-z0-9._~\-]{32,256}" :required="!namespaceForm.id || !namespaceForm.api_key_configured" x-model="namespaceForm.api_key" autocomplete="new-password" spellcheck="false" placeholder="至少 32 个 URL 安全字符"><span class="field-help" x-text="namespaceForm.api_key_configured ? '已安全配置；留空保持不变，填写新值可轮换' : '用于读取此命名空间的已发布配置，保存后不会再次显示'"></span></label>
+        <label class="field-label">说明<textarea class="text-input mt-2 min-h-24 resize-y" maxlength="500" x-model.trim="namespaceForm.description" placeholder="说明这个命名空间包含的项目或业务"></textarea></label>
+        <div class="flex items-center justify-between gap-3 pt-2">
+          <button x-show="namespaceForm.id" type="button" class="btn-danger-ghost" :disabled="namespaceSaving" @click="deleteSelectedNamespace()">删除命名空间</button>
+          <span x-show="!namespaceForm.id"></span>
+          <div class="flex justify-end gap-3"><button type="button" class="btn-secondary" @click="closeNamespaceModal()">取消</button><button type="submit" class="btn-primary" :disabled="namespaceSaving" x-text="namespaceSaving ? '保存中…' : '保存命名空间'"></button></div>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div x-show="environmentModal" x-transition.opacity class="modal-backdrop" @keydown.escape.window="closeEnvironmentModal()">
+    <section x-show="environmentModal" x-transition class="modal-card" @click.outside="closeEnvironmentModal()">
+      <div class="flex items-start justify-between gap-4">
+        <div><h2 class="text-lg font-semibold" x-text="environmentForm.id ? '编辑环境' : '创建环境'"></h2><p class="mt-1 text-sm text-slate-500">环境标识用于稳定识别，父环境提供可继承的默认配置。</p></div>
+        <button type="button" class="icon-button" @click="closeEnvironmentModal()">×</button>
+      </div>
+      <form class="mt-6 space-y-5" @submit.prevent="saveEnvironment()">
+        <label class="field-label">环境名称<input class="text-input mt-2" maxlength="100" required x-model.trim="environmentForm.name" placeholder="例如：生产环境"></label>
+        <label class="field-label">环境标识<input class="text-input mt-2 font-mono" maxlength="64" required x-model.trim="environmentForm.slug" placeholder="production"><span class="field-help">小写字母开头，可包含数字、- 和 _</span></label>
+        <div>
+          <label id="parent-environment-label" class="field-label">父环境</label>
+          <div class="custom-select mt-2" @click.outside="parentSelectorOpen = false" @keydown.escape.stop="parentSelectorOpen = false">
+            <button
+              type="button"
+              class="custom-select-trigger font-mono"
+              aria-labelledby="parent-environment-label"
+              aria-haspopup="listbox"
+              :aria-expanded="parentSelectorOpen"
+              @click="parentSelectorOpen = !parentSelectorOpen"
+            >
+              <span class="truncate" x-text="selectedParentLabel"></span>
+              <span class="dropdown-arrow" :class="parentSelectorOpen && 'dropdown-arrow-open'" aria-hidden="true"></span>
+            </button>
+            <div x-show="parentSelectorOpen" x-transition.origin.top class="custom-select-menu parent-tree-menu" role="listbox" aria-label="父环境">
+              <div class="select-menu-scroll">
+              <template x-for="row in availableParentRows" :key="row.environment.id">
+                <div
+                  class="parent-tree-row"
+                  :data-tree-depth="row.depth"
+                  :style="`--parent-track: ${8 + row.depth * 17}px; --parent-node: ${25 + row.depth * 17}px; --parent-card: ${37 + row.depth * 17}px`"
+                >
+                  <div class="parent-tree-lines" aria-hidden="true">
+                    <template x-for="(continues, level) in row.ancestorContinuations" :key="level">
+                      <span class="parent-tree-rail" :class="continues ? '' : 'parent-tree-rail-hidden'" :style="`left: ${8 + level * 17}px`"></span>
+                    </template>
+                    <span x-show="row.hasPrevious" class="parent-tree-current-upper"></span>
+                    <span x-show="!row.isLast" class="parent-tree-current-lower"></span>
+                    <span x-show="row.hasChildren" class="parent-tree-child-lower"></span>
+                    <span x-show="!row.virtual" class="parent-tree-connector"></span>
+                    <span class="parent-tree-dot" :class="row.virtual ? 'parent-tree-dot-root' : environmentForm.parent_id === row.environment.id ? 'parent-tree-dot-active' : ''"></span>
+                  </div>
+                  <button
+                    type="button"
+                    class="parent-tree-option"
+                    :class="(row.virtual ? !environmentForm.parent_id : environmentForm.parent_id === row.environment.id) && 'parent-tree-option-selected'"
+                    role="option"
+                    :aria-selected="row.virtual ? !environmentForm.parent_id : environmentForm.parent_id === row.environment.id"
+                    @click="selectParentEnvironment(row.virtual ? 0 : row.environment.id)"
+                  >
+                    <span class="min-w-0 flex-1 truncate" x-text="row.virtual ? '无（创建为根环境）' : row.environment.name"></span>
+                    <code x-show="!row.virtual" class="shrink-0 text-[11px] text-slate-400" x-text="row.environment.slug"></code>
+                    <span x-show="row.virtual" class="environment-root-badge">根环境</span>
+                    <span x-show="row.virtual ? !environmentForm.parent_id : environmentForm.parent_id === row.environment.id" class="parent-tree-check" aria-hidden="true">✓</span>
+                  </button>
+                </div>
+              </template>
+              </div>
+            </div>
+          </div>
+          <span class="field-help">环境名称右侧显示环境标识，连接线表示完整继承层级。</span>
+        </div>
+        <label class="field-label">说明<textarea class="text-input mt-2 min-h-24 resize-y" maxlength="500" x-model.trim="environmentForm.description" placeholder="说明这个环境的用途"></textarea></label>
+        <div class="flex justify-end gap-3 pt-2"><button type="button" class="btn-secondary" @click="closeEnvironmentModal()">取消</button><button type="submit" class="btn-primary" :disabled="environmentSaving" x-text="environmentSaving ? '保存中…' : '保存环境'"></button></div>
+      </form>
+    </section>
+  </div>
+
+  <div x-show="confirmation.open" x-transition.opacity class="modal-backdrop" @keydown.escape.window="closeConfirmation()">
+    <section
+      x-show="confirmation.open"
+      x-transition
+      class="confirmation-card"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="confirmation-title"
+      aria-describedby="confirmation-message"
+      @click.outside="closeConfirmation()"
+    >
+      <div class="confirmation-icon" :class="confirmation.tone === 'danger' ? 'confirmation-icon-danger' : 'confirmation-icon-primary'" aria-hidden="true">
+        <span x-text="confirmation.tone === 'danger' ? '!' : '↗'"></span>
+      </div>
+      <div class="min-w-0 flex-1">
+        <h2 id="confirmation-title" class="text-lg font-semibold text-slate-900" x-text="confirmation.title"></h2>
+        <p id="confirmation-message" class="mt-2 text-sm leading-6 text-slate-500" x-text="confirmation.message"></p>
+        <div x-show="confirmation.targets.length" class="confirmation-targets">
+          <template x-for="target in confirmation.targets" :key="target.id">
+            <div class="confirmation-target">
+              <div class="min-w-0">
+                <strong class="block truncate text-sm text-slate-800" x-text="target.name"></strong>
+                <code class="mt-0.5 block truncate text-xs text-slate-500" x-text="target.slug"></code>
+              </div>
+              <span class="confirmation-target-id" x-text="`ID: ${target.id}`"></span>
+            </div>
+          </template>
+        </div>
+        <label x-show="confirmation.kind === 'publish'" class="publish-reason-field">
+          <span>发布原因 <strong>必填</strong></span>
+          <textarea
+            x-ref="publishReason"
+            class="publish-reason-input"
+            rows="3"
+            maxlength="1000"
+            x-model="confirmation.reason"
+            @keydown.meta.enter.prevent="confirmPendingAction()"
+            @keydown.ctrl.enter.prevent="confirmPendingAction()"
+            placeholder="说明本次为什么更新和发布，例如：修复生产环境数据库连接配置"
+          ></textarea>
+          <small><span x-text="confirmation.reason.length"></span>/1000 · Ctrl/⌘ + Enter 发布</small>
+        </label>
+        <div class="mt-6 flex justify-end gap-3">
+          <button type="button" class="btn-secondary" :disabled="confirming" @click="closeConfirmation()">取消</button>
+          <button
+            type="button"
+            x-ref="confirmationButton"
+            :class="confirmation.tone === 'danger' ? 'btn-danger' : 'btn-primary'"
+            :disabled="confirming || (confirmation.kind === 'publish' && !confirmation.reason.trim())"
+            @click="confirmPendingAction()"
+            x-text="confirming ? '处理中…' : confirmation.confirmLabel"
+          ></button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toast-stack" aria-live="polite">
+    <template x-for="toast in toasts" :key="toast.id"><div class="toast" :class="toast.type === 'error' ? 'toast-error' : 'toast-success'" x-text="toast.message"></div></template>
+  </div>
+</main>
+{{ end }}

@@ -1,0 +1,224 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+[x-cloak] { display: none !important; }
+button, input, select, textarea { outline: none; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { @apply ring-2 ring-indigo-500 ring-offset-1; }
+button:disabled { @apply cursor-not-allowed opacity-50; }
+
+.btn-primary { @apply inline-flex h-10 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700; }
+.btn-danger { @apply inline-flex h-10 items-center justify-center rounded-lg bg-rose-600 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-rose-700; }
+.btn-secondary { @apply inline-flex h-10 items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50; }
+.btn-ghost { @apply inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100; }
+.btn-danger-ghost { @apply inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-rose-600 hover:bg-rose-50; }
+.icon-button { @apply grid h-9 w-9 place-items-center rounded-lg text-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800; }
+.sidebar-restore-button { @apply inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700; }
+.namespace-switcher { @apply relative; }
+.namespace-switcher-trigger { @apply flex h-11 min-w-56 max-w-72 items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 text-left shadow-sm transition hover:border-indigo-200 hover:bg-indigo-50/40; }
+.namespace-switcher-trigger > code { @apply max-w-24 truncate rounded-md bg-slate-100 px-2 py-1 text-[11px] text-slate-500; }
+.namespace-switcher-label { @apply min-w-0 flex-1; }
+.namespace-switcher-label small { @apply block text-[10px] leading-3 text-slate-400; }
+.namespace-switcher-label strong { @apply block truncate text-sm font-semibold text-slate-700; }
+.namespace-switcher-menu { @apply absolute left-0 top-[calc(100%+6px)] z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl isolate; }
+.namespace-switcher-menu .select-menu-scroll { @apply max-h-72; }
+.namespace-switcher-option { @apply flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm text-slate-600 transition hover:bg-slate-50 hover:text-slate-900; }
+.namespace-switcher-option-selected { @apply bg-indigo-50 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700; }
+.namespace-switcher-footer { @apply mt-1 grid grid-cols-2 gap-1 border-t border-slate-100 pt-1; }
+.namespace-switcher-footer button { @apply flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2.5 text-sm font-medium text-indigo-600 transition hover:bg-indigo-50; }
+.namespace-switcher-footer button > span { @apply inline-grid h-5 w-5 shrink-0 place-items-center text-base; }
+.panel { @apply rounded-2xl border border-slate-200 bg-white shadow-sm; }
+.panel-header { @apply flex min-h-20 flex-wrap items-center justify-between gap-4 border-b border-slate-200 px-5 py-4; }
+.panel-content-clip { @apply overflow-hidden rounded-b-2xl; }
+.skeleton { @apply animate-pulse rounded-xl bg-slate-200; }
+.empty-state { @apply flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 px-5 py-10 text-xs text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50; }
+.empty-state strong { @apply text-sm text-slate-700; }
+
+.environment-tree-list { @apply py-1; }
+.environment-tree-row { @apply relative py-1; }
+.environment-tree-lines { @apply pointer-events-none absolute inset-0; }
+.environment-tree-rail { @apply absolute -bottom-px -top-px border-l-2 border-slate-300; }
+.environment-tree-rail-hidden { @apply border-transparent; }
+.environment-tree-current-upper { @apply absolute border-l-2 border-slate-300; left: var(--tree-track); top: -1px; height: calc(50% + 1px); }
+.environment-tree-current-lower { @apply absolute border-l-2 border-slate-300; left: var(--tree-track); top: 50%; bottom: -1px; }
+.environment-tree-child-lower { @apply absolute border-l-2 border-slate-300; left: var(--tree-node); top: 50%; bottom: -1px; }
+.environment-tree-connector { @apply absolute top-1/2 border-t-2 border-slate-300; left: var(--tree-track); width: 18px; }
+.environment-tree-dot { @apply absolute z-10 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-300 bg-white transition; left: var(--tree-node); }
+.environment-tree-dot-active { @apply border-indigo-600 bg-indigo-600 ring-4 ring-indigo-100; }
+.environment-tree-dot-root { @apply border-slate-600 bg-slate-600 ring-4 ring-slate-100; }
+.environment-card { @apply flex min-h-16 items-center gap-3 rounded-xl border border-transparent px-3 py-2.5 transition hover:bg-slate-50; margin-left: var(--tree-card); }
+.environment-card-active { @apply border-indigo-200 bg-indigo-50 hover:bg-indigo-50; }
+.environment-root-card { @apply border-slate-200 bg-slate-50 hover:bg-slate-50; }
+.environment-root-badge { @apply shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-medium text-slate-500; }
+.version-badge { @apply shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500; }
+.environment-card-active .version-badge { @apply bg-white text-indigo-600; }
+.publish-check input { @apply sr-only; }
+.publish-check span { @apply grid h-5 w-5 cursor-pointer place-items-center rounded-md border-2 border-slate-300 bg-white text-xs font-bold text-white transition; }
+.publish-check span::after { content: "✓"; opacity: 0; transform: scale(0.6); transition: opacity 120ms ease, transform 120ms ease; }
+.publish-check input:focus-visible + span { @apply ring-2 ring-indigo-500 ring-offset-2; }
+.publish-check input:checked + span { @apply border-indigo-600 bg-indigo-600; }
+.publish-check input:checked + span::after { opacity: 1; transform: scale(1); }
+.tab-bar { @apply mb-5 flex min-w-0 flex-wrap overflow-visible border-b border-slate-200; }
+.tab-content { @apply min-w-0 overflow-visible; }
+.tab-content > * { min-width: 0; }
+.tab-button { @apply -mb-px whitespace-nowrap border-b-2 border-transparent px-5 py-3 text-sm font-medium text-slate-500 transition hover:text-slate-800; }
+.tab-button-active { @apply border-indigo-600 text-indigo-600; }
+.status-dot { @apply rounded-full px-2.5 py-1 text-xs font-medium; }
+.status-dot-ok { @apply bg-emerald-50 text-emerald-700; }
+.status-dot-warn { @apply bg-amber-50 text-amber-700; }
+.config-preview { @apply max-h-[70vh] overflow-auto bg-slate-950 p-5 font-mono text-xs leading-6 text-slate-200; tab-size: 2; }
+.config-empty-state { @apply grid min-h-64 place-items-center bg-slate-50 p-8 text-center; }
+.config-empty-state-large { @apply min-h-[480px]; }
+.config-empty-state-icon { @apply mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-white text-xl font-semibold text-indigo-500 shadow-sm ring-1 ring-slate-200; }
+.config-empty-state h4 { @apply text-sm font-semibold text-slate-700; }
+.config-empty-state p { @apply mx-auto mt-2 max-w-sm text-xs leading-6 text-slate-500; }
+
+.config-root { @apply py-1; }
+.config-collection { @apply space-y-2; }
+.config-collection-nested { @apply pl-1; }
+.config-node { @apply border-b border-slate-100 last:border-b-0; }
+.config-row { @apply flex min-h-12 flex-wrap items-center gap-2 px-1 py-2; }
+.config-row-long-text { @apply items-start; }
+.config-index { @apply grid h-8 w-10 shrink-0 place-items-center rounded-md bg-slate-100 font-mono text-xs text-slate-500; }
+.config-key { @apply h-9 min-w-0 flex-[1_1_180px] rounded-md border border-slate-200 bg-white px-3 font-mono text-xs text-slate-800 transition focus:border-indigo-400; }
+.config-value { @apply h-9 min-w-0 flex-[1_1_150px] rounded-md border border-slate-200 bg-white px-3 font-mono text-xs text-slate-800 focus:border-indigo-400; }
+textarea.config-value { @apply min-h-16 resize-y py-2; }
+.config-value-long-text { @apply min-h-24 resize-y py-2 leading-5; }
+.config-summary { @apply min-w-0 flex-[1_1_120px] text-xs text-slate-400; }
+.config-actions { @apply ml-auto flex shrink-0 items-center gap-1; }
+.config-action { @apply grid h-8 w-8 place-items-center rounded-md text-sm text-slate-400 transition hover:bg-slate-100 hover:text-slate-700; }
+.config-description-control { @apply relative; }
+.config-description-control-open { @apply z-50; }
+.config-description-trigger { @apply relative hover:bg-indigo-50 hover:text-indigo-600; }
+.config-description-trigger-has-value { @apply bg-indigo-50 text-indigo-600; }
+.config-description-trigger-has-value::after { content: ""; @apply absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-indigo-500 ring-2 ring-white; }
+.config-description-icon { @apply h-4 w-4 fill-none stroke-current; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.config-description-popover { @apply absolute bottom-[calc(100%+8px)] right-0 z-50 w-72 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-2xl; }
+.config-description-popover::after { content: ""; @apply absolute -bottom-1.5 right-3.5 h-3 w-3 rotate-45 border-b border-r border-slate-200 bg-white; }
+.config-description-popover-header { @apply mb-2 flex items-center justify-between text-xs text-slate-700; }
+.config-description-close { @apply grid h-6 w-6 place-items-center rounded-md text-base font-normal text-slate-400 transition hover:bg-slate-100 hover:text-slate-700; }
+.config-description-input { @apply block min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700 transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white; }
+.config-description-count { @apply mt-1.5 block text-right text-[10px] text-slate-400; }
+.config-remove { @apply text-base hover:bg-rose-50 hover:text-rose-600; }
+.config-nested { @apply relative ml-2 pb-2 pl-4; }
+.config-nested::before { content: ""; @apply absolute -top-2 bottom-3 left-0 border-l-2; border-color: var(--config-group-color); }
+.config-collection-nested > .config-node { @apply relative; }
+.config-collection-nested > .config-node::before { content: ""; position: absolute; left: -1.25rem; top: 1.5rem; width: 1.25rem; border-top: 2px solid var(--config-group-color); }
+.config-collection-nested > .config-node::after { content: ""; position: absolute; left: -0.1875rem; top: 1.3125rem; width: 0.375rem; height: 0.375rem; border: 2px solid var(--config-group-color); border-radius: 9999px; background: white; }
+.config-nested[data-depth="0"] { --config-group-color: #818cf8; }
+.config-nested[data-depth="1"] { --config-group-color: #38bdf8; }
+.config-nested[data-depth="2"] { --config-group-color: #34d399; }
+.config-nested[data-depth="3"] { --config-group-color: #fbbf24; }
+.config-nested[data-depth="4"] { --config-group-color: #fb7185; }
+.config-nested[data-depth="5"] { --config-group-color: #c084fc; }
+.config-add { @apply flex h-9 w-full items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs font-medium text-slate-500 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600; }
+.config-empty { @apply rounded-lg border border-dashed border-slate-200 py-5 text-center text-xs text-slate-400; }
+
+.config-dropdown { @apply relative shrink-0; }
+.config-dropdown-open { @apply z-40; }
+.config-type-dropdown { @apply w-24; }
+.config-value-dropdown { @apply min-w-28 flex-[1_1_150px]; }
+.config-dropdown-trigger { @apply flex h-9 w-full items-center gap-3 rounded-md border border-slate-200 bg-white px-3 text-left font-mono text-xs text-slate-700 transition hover:border-slate-300; }
+.config-type-dropdown .config-dropdown-trigger { @apply bg-slate-50; }
+.config-dropdown-label { @apply min-w-0 flex-1 truncate; }
+.dropdown-arrow { @apply ml-auto mr-0.5 h-2 w-2 shrink-0 rotate-45 border-b-2 border-r-2 border-slate-400 transition; }
+.config-dropdown-open .dropdown-arrow, .dropdown-arrow-open { rotate: 225deg; }
+.config-dropdown-menu { @apply absolute left-0 top-[calc(100%+4px)] z-40 min-w-full overflow-hidden rounded-lg border border-slate-200 bg-white p-1 shadow-xl isolate; }
+.config-dropdown-up .config-dropdown-menu { @apply bottom-[calc(100%+4px)] top-auto; }
+.config-dropdown-option { @apply flex w-full items-center rounded-md px-3 py-2 text-left font-mono text-xs text-slate-600 transition hover:bg-slate-100 hover:text-slate-900; }
+.config-dropdown-option-selected { @apply bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700; }
+
+.custom-select { @apply relative; }
+.custom-select-trigger { @apply flex h-11 w-full items-center gap-4 rounded-lg border border-slate-300 bg-white px-3 text-left text-sm text-slate-800 shadow-sm transition hover:border-slate-400; }
+.custom-select-menu { @apply absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl isolate; }
+.select-menu-scroll { @apply max-h-[calc(16rem-0.75rem)] overflow-y-auto overscroll-contain bg-white; }
+.config-dropdown-menu .select-menu-scroll { max-height: calc(14rem - 0.5rem); }
+.custom-select-option { @apply block w-full rounded-lg px-3 py-2.5 text-left text-sm text-slate-600 transition hover:bg-slate-100 hover:text-slate-900; }
+.custom-select-option-selected { @apply bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700; }
+
+.parent-tree-menu { @apply max-h-72 p-2; }
+.parent-tree-menu .select-menu-scroll { max-height: calc(18rem - 1rem); }
+.parent-tree-row { @apply relative py-1; }
+.parent-tree-lines { @apply pointer-events-none absolute inset-0; }
+.parent-tree-rail { @apply absolute -bottom-px -top-px border-l-2 border-slate-200; }
+.parent-tree-rail-hidden { @apply border-transparent; }
+.parent-tree-current-upper { @apply absolute border-l-2 border-slate-200; left: var(--parent-track); top: -1px; height: 23px; }
+.parent-tree-current-lower { @apply absolute border-l-2 border-slate-200; left: var(--parent-track); top: 22px; bottom: -1px; }
+.parent-tree-child-lower { @apply absolute border-l-2 border-slate-200; left: var(--parent-node); top: 22px; bottom: -1px; }
+.parent-tree-connector { @apply absolute border-t-2 border-slate-200; left: var(--parent-track); top: 22px; width: 17px; }
+.parent-tree-dot { @apply absolute z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-300 bg-white; left: var(--parent-node); top: 22px; }
+.parent-tree-dot-active { @apply border-indigo-600 bg-indigo-600 ring-4 ring-indigo-100; }
+.parent-tree-dot-root { @apply border-slate-600 bg-slate-600 ring-4 ring-slate-100; }
+.parent-tree-option { @apply flex min-h-9 items-center gap-2 rounded-lg border border-transparent px-2.5 py-2 text-left text-xs text-slate-600 transition hover:bg-slate-50 hover:text-slate-900; width: calc(100% - var(--parent-card)); margin-left: var(--parent-card); }
+.parent-tree-option-selected { @apply border-indigo-100 bg-indigo-50 font-medium text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700; }
+.parent-tree-check { @apply ml-auto shrink-0 font-bold text-indigo-600; }
+
+.format-select { @apply relative shrink-0; }
+.format-select-trigger { @apply flex h-9 min-w-24 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-800; }
+.format-select-menu { @apply absolute right-0 top-[calc(100%+4px)] z-50 min-w-32 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl isolate; }
+.published-version-menu { @apply min-w-64; }
+.published-version-option { @apply whitespace-nowrap; }
+.release-reason { @apply border-b border-slate-200 bg-slate-50 px-5 py-4; }
+.release-reason-header { @apply flex items-center justify-between gap-3 text-xs font-medium text-slate-500; }
+.release-reason-header code { @apply rounded-md bg-white px-2 py-1 text-[11px] text-slate-500 ring-1 ring-slate-200; }
+.release-reason p { @apply mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700; }
+.comparison-source-menu { @apply max-h-80 p-2; }
+.comparison-source-menu .select-menu-scroll { max-height: calc(20rem - 1rem); }
+.comparison-tree-row { @apply relative py-1; }
+.comparison-tree-lines { @apply pointer-events-none absolute inset-0; }
+.comparison-tree-rail { @apply absolute -bottom-px -top-px border-l-2 border-slate-200; }
+.comparison-tree-rail-hidden { @apply border-transparent; }
+.comparison-tree-current-upper { @apply absolute border-l-2 border-slate-200; left: var(--comparison-track); top: -1px; height: 23px; }
+.comparison-tree-current-lower { @apply absolute border-l-2 border-slate-200; left: var(--comparison-track); top: 22px; bottom: -1px; }
+.comparison-tree-child-lower { @apply absolute border-l-2 border-slate-200; left: var(--comparison-node); top: 22px; bottom: -1px; }
+.comparison-tree-connector { @apply absolute border-t-2 border-slate-200; left: var(--comparison-track); top: 22px; width: 16px; }
+.comparison-tree-dot { @apply absolute z-10 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-300 bg-white; left: var(--comparison-node); top: 22px; }
+.comparison-tree-dot-active { @apply border-indigo-600 bg-indigo-600 ring-4 ring-indigo-100; }
+.comparison-tree-dot-root { @apply border-slate-600 bg-slate-600 ring-4 ring-slate-100; }
+.comparison-tree-card { @apply rounded-lg border border-transparent px-2 py-1.5 transition; margin-left: var(--comparison-card); }
+.comparison-tree-card-active { @apply border-indigo-100 bg-indigo-50/60; }
+.comparison-tree-root-card { @apply border-slate-200 bg-slate-50; }
+.comparison-tree-environment { @apply flex h-7 min-w-0 items-center gap-2 text-xs text-slate-700; }
+.comparison-tree-sources { @apply mt-1 space-y-0.5 border-l border-slate-200 pl-2; }
+.comparison-tree-source { @apply flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-slate-500 transition hover:bg-white hover:text-slate-800; }
+.comparison-tree-source-selected { @apply bg-white font-medium text-indigo-700 shadow-sm ring-1 ring-indigo-100 hover:text-indigo-700; }
+.comparison-tree-check { @apply ml-auto shrink-0 font-bold text-indigo-600; }
+.diff-viewer { @apply min-w-0 overflow-auto bg-white; }
+.diff-viewer > diffs-container { display: block; min-width: 0; }
+
+.modal-backdrop { @apply fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-slate-950/45 p-4 backdrop-blur-sm; }
+.modal-card { @apply w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl; }
+.confirmation-card { @apply flex w-full max-w-lg items-start gap-4 rounded-2xl bg-white p-6 shadow-2xl; }
+.confirmation-icon { @apply grid h-11 w-11 shrink-0 place-items-center rounded-full text-lg font-bold; }
+.confirmation-icon-danger { @apply bg-rose-50 text-rose-600; }
+.confirmation-icon-primary { @apply bg-indigo-50 text-indigo-600; }
+.confirmation-targets { @apply mt-4 max-h-52 space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-2; }
+.confirmation-target { @apply flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2.5; }
+.confirmation-target-id { @apply shrink-0 rounded-md bg-slate-100 px-2 py-1 font-mono text-xs font-medium text-slate-600; }
+.publish-reason-field { @apply mt-5 block; }
+.publish-reason-field > span { @apply flex items-center gap-2 text-sm font-medium text-slate-700; }
+.publish-reason-field strong { @apply rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600; }
+.publish-reason-input { @apply mt-2 block min-h-24 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-indigo-500; }
+.publish-reason-field small { @apply mt-1.5 block text-right text-[10px] text-slate-400; }
+.field-label { @apply block text-sm font-medium text-slate-700; }
+.field-help { @apply mt-1.5 block text-xs font-normal text-slate-400; }
+.text-input { @apply block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-indigo-500; }
+.toast-stack { @apply pointer-events-none fixed bottom-5 right-5 z-[60] flex w-[min(360px,calc(100vw-40px))] flex-col gap-2; }
+.toast { @apply rounded-xl border bg-white px-4 py-3 text-sm font-medium shadow-lg; }
+.toast-success { @apply border-emerald-200 text-emerald-700; }
+.toast-error { @apply border-rose-200 text-rose-700; }
+
+.config-center-footer { @apply mt-8 border-t border-slate-800 bg-slate-950 text-slate-300; }
+.config-center-footer-inner { @apply mx-auto grid max-w-[1600px] gap-8 px-5 pb-16 pt-10 md:grid-cols-[0.8fr_1.2fr] sm:px-6 lg:px-8; }
+.config-center-footer-eyebrow { @apply text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300; }
+.config-center-footer h2 { @apply mt-2 text-xl font-semibold text-white; }
+.config-center-footer p { @apply mt-3 max-w-lg text-sm leading-6 text-slate-400; }
+.config-center-footer-docs { @apply min-w-0 space-y-4; }
+.config-center-footer-row { @apply rounded-xl border border-slate-800 bg-slate-900/70 p-4; }
+.config-center-footer-label { @apply mb-2 block text-xs font-medium text-slate-400; }
+.config-center-footer-code { @apply block min-w-0 whitespace-pre-wrap break-all font-mono text-xs leading-6 text-slate-200; }
+.config-center-footer-copy { @apply mt-3 inline-flex h-8 items-center rounded-lg border border-slate-700 px-3 text-xs font-medium text-slate-300 transition hover:border-indigo-400 hover:text-white; }
+.config-center-footer-formats { @apply mt-4 flex flex-wrap gap-2; }
+.config-center-footer-formats code { @apply rounded-md bg-slate-800 px-2 py-1 text-[11px] text-slate-300; }
