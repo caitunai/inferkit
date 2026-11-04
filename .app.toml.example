@@ -131,3 +131,6 @@ enabled=false
 provider="file"
 activeKey="config-key-v1"
 keyring="/absolute/path/to/config-center-keys.json"
+
+[image.filter]
+model="/path/to/artwork_fp32"
