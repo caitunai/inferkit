@@ -6,6 +6,7 @@ The project template of Golang.
 - [第三方图片分类 API 接入文档](docs/IMAGE_FILTER_API.md)
 - [识别结果采集、筛选列表与逐张人工纠错](docs/IMAGE_REVIEW.md)
 - [Go CPU 部署、CLI 和浏览器检测工作台](docs/GO_ONNX_SERVER.md)
+- [Debian 11 x86_64 原生 CPU 部署与 ONNX Runtime 兼容检查](docs/DEBIAN11_DEPLOYMENT.md)
 - [ONNX 模型部署协议](docs/ONNX_DEPLOYMENT.md)
 
 ## How to use

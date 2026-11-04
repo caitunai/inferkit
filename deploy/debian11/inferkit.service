@@ -1,0 +1,25 @@
+[Unit]
+Description=InferKit CPU image filter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=inferkit
+Group=inferkit
+WorkingDirectory=/opt/inferkit
+Environment=LANG=en_US.UTF-8
+ExecStart=/opt/inferkit/inferkit --config /etc/inferkit/app.toml image-filter serve
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=45s
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inferkit
+
+[Install]
+WantedBy=multi-user.target
