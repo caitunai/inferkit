@@ -6,6 +6,7 @@ const MAX_STORED_LENGTH = 3 * 1024 * 1024;
 export function imageURL(value) {
   const raw = String(value || "").trim();
   if (!raw || raw.length > 8192) throw new Error("请输入有效的图片 URL。");
+  if (!/^https?:\/\/[^/\\\s]/i.test(raw)) throw new Error("请输入完整的 http:// 或 https:// 图片地址。");
   let url;
   try { url = new URL(raw); } catch { throw new Error("请输入完整的 http:// 或 https:// 图片地址。"); }
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.hash) {

@@ -3,24 +3,7 @@ import test from "node:test";
 import { createImageFilterApp } from "./app.js";
 import { HISTORY_KEY } from "./history.js";
 import { TOKEN_KEY } from "./credential.js";
-
-const prediction = { label: "1_valid", labels: ["0_invalid", "1_valid"], probabilities: [0.1, 0.9], class_id: 1, confidence: 0.9, sha256: "a".repeat(64) };
-function setup(overrides = {}) {
-  const saved = new Map(), localSaved = new Map(), requests = [], revoked = [];
-  const browser = {
-    sessionStorage: { getItem: (key) => saved.get(key) ?? null, setItem: (key, value) => saved.set(key, value), removeItem: (key) => saved.delete(key) },
-    localStorage: { getItem: (key) => localSaved.get(key) ?? null, setItem: (key, value) => localSaved.set(key, value), removeItem: (key) => localSaved.delete(key) },
-    URL: { createObjectURL: () => "blob:test", revokeObjectURL: (value) => revoked.push(value) },
-    createImageBitmap: async () => { throw new Error("thumbnail unavailable"); },
-    crypto: { randomUUID: () => String(requests.length) }, performance: { now: () => 100 },
-    setTimeout, clearTimeout, AbortController, FormData,
-    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, status: 200, json: async () => ({ status: 0, data: { result: prediction } }) }; },
-    ...overrides,
-  };
-  const app = createImageFilterApp(browser);
-  app.$el = { dataset: {} }; app.$refs = {}; app.init(); app.token = "test-token";
-  return { app, browser, saved, localSaved, requests, revoked };
-}
+import { setup } from "./test-support.js";
 test("URL classification persists token separately from session history and restores both", async () => {
   const { app, requests, browser, saved, localSaved } = setup();
   app.mode = "url"; app.url = "https://example.com/image.png";
@@ -44,7 +27,7 @@ test("clipboard images upload once and release their object URLs", async () => {
   const file = new File(["image"], "paste.png", { type: "image/png" });
   await app.onPaste({ clipboardData: { items: [{ kind: "file", type: file.type, getAsFile: () => file }] }, preventDefault() { prevented = true; } });
   assert.equal(prevented, true);
-  await app.detect();
+  assert.equal(requests.length, 1);
   assert.equal(requests[0].options.body.get("file").name, "paste.png");
   assert.equal(app.history[0].kind, "paste");
   app.clearFile(); app.destroy();
@@ -61,7 +44,7 @@ test("all four image formats and unreported MIME types can be uploaded", async (
     const { app, requests } = setup();
     await app.selectFile(new File(["image"], name, { type }));
     assert.equal(app.canSubmit, true, name);
-    await app.detect();
+    assert.equal(requests.length, 1);
     assert.equal(requests[0].options.body.get("file").name, name);
     assert.equal(app.result.label, "1_valid");
     app.destroy();

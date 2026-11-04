@@ -2,6 +2,7 @@ import { HISTORY_LIMIT, HISTORY_KEY, THUMBNAIL_LIMIT, imageURL, labelTitle, load
 import { TOKEN_KEY, cleanToken, credentialExpired, loadCredential, saveCredential } from "./credential.js";
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+const URL_DEBOUNCE_MS = 600;
 
 function supportedImageFile(file) {
   const type = String(file.type || "").toLowerCase();
@@ -33,6 +34,14 @@ export function createImageFilterApp(browser = window) {
   let request = null;
   let disposed = false;
   let selection = 0;
+  let autoTimer = null;
+  let autoPending = false;
+  let lastSubmittedSource = "";
+  const clearAuto = () => {
+    browser.clearTimeout(autoTimer);
+    autoTimer = null;
+    autoPending = false;
+  };
   const releasePreview = () => {
     if (objectURL) browser.URL.revokeObjectURL(objectURL);
     objectURL = "";
@@ -57,7 +66,7 @@ export function createImageFilterApp(browser = window) {
         this.tokenExpiresAt = credential?.expiresAt || 0;
       } catch { this.credentialNotice = "浏览器未开放本地存储，Token 仅保留在当前页面。"; }
     },
-    destroy() { disposed = true; selection++; request?.abort(); releasePreview(); },
+    destroy() { disposed = true; selection++; clearAuto(); request?.abort(); releasePreview(); },
     get active() { return this.history.find((item) => item.id === this.activeID) || null; },
     get result() { return this.active?.result || null; },
     get successCount() { return this.history.filter((item) => item.result).length; },
@@ -80,9 +89,34 @@ export function createImageFilterApp(browser = window) {
     timeLabel(value) { return new Date(value).toLocaleTimeString("zh-CN", { hour12: false }); },
     durationLabel(value) { return value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(2)} s`; },
     sourceLabel(kind) { return ({ file: "本地文件", paste: "粘贴图片", url: "图片 URL" })[kind]; },
-    selectMode(mode) { if (!this.busy) { this.mode = mode; this.error = ""; } },
+    selectMode(mode) {
+      if (this.mode === mode) return;
+      clearAuto(); this.mode = mode; this.error = "";
+      if (mode === "url") this.onURLInput(this.url);
+      else if (file) return this.autoDetect();
+    },
+    sourceKey() {
+      if (this.mode === "file") return file ? `file:${selection}` : "";
+      try { return `url:${imageURL(this.url)}`; } catch { return ""; }
+    },
+    onURLInput(value, composing = false) {
+      this.url = value; this.error = ""; clearAuto();
+      if (disposed || composing || !this.sourceKey()) return;
+      autoTimer = browser.setTimeout(() => {
+        autoTimer = null;
+        this.autoDetect();
+      }, URL_DEBOUNCE_MS);
+    },
+    autoDetect() {
+      const key = this.sourceKey();
+      if (disposed || !key || key === lastSubmittedSource) return;
+      if (this.busy) { autoPending = true; return; }
+      autoPending = false;
+      return this.detect();
+    },
     async selectFile(value, kind = "file") {
-      if (!value || this.busy) return;
+      if (!value || disposed) return;
+      clearAuto();
       this.error = "";
       if (!supportedImageFile(value)) { this.error = "请选择 JPEG、WebP、AVIF 或 PNG 图片。"; return; }
       if (value.size > this.maxBytes) { this.error = `图片超过 ${Math.round(this.maxBytes / 1024 / 1024)} MB 限制。`; return; }
@@ -100,16 +134,16 @@ export function createImageFilterApp(browser = window) {
         const result = await thumbnail(value, browser);
         if (!disposed && version === selection) this.pendingThumbnail = result;
       } catch { /* Thumbnail generation is optional; server decoding remains authoritative. */ }
+      if (!disposed && version === selection && this.mode === "file") return this.autoDetect();
     },
     clearFile() {
       if (this.busy) return;
-      selection++; releasePreview(); file = null;
+      clearAuto(); selection++; releasePreview(); file = null;
       this.fileName = ""; this.preview = ""; this.fileSize = ""; this.pendingThumbnail = "";
       if (this.$refs.fileInput) this.$refs.fileInput.value = "";
     },
     onFileInput(event) { const value = event.target.files?.[0]; event.target.value = ""; return this.selectFile(value); },
     onPaste(event) {
-      if (this.busy) return;
       const item = [...(event.clipboardData?.items || [])].find((item) => item.kind === "file" && item.type.startsWith("image/"));
       if (!item) return;
       event.preventDefault();
@@ -130,9 +164,11 @@ export function createImageFilterApp(browser = window) {
         this.credentialNotice = "";
       } catch { this.credentialNotice = "浏览器无法保存 Token，当前页面仍可继续检测。"; }
       if (close && !this.credentialNotice) this.accessOpen = false;
+      if (close) this.autoDetect();
       return true;
     },
     forgetToken() {
+      clearAuto(); lastSubmittedSource = "";
       this.token = ""; this.tokenExpiresAt = 0; this.credentialNotice = "";
       try { browser.localStorage.removeItem(TOKEN_KEY); } catch { this.credentialNotice = "无法清除浏览器保存的 Token，请检查存储权限。"; }
     },
@@ -146,14 +182,17 @@ export function createImageFilterApp(browser = window) {
       this.history = []; this.activeID = ""; this.previewFailed = false; this.notice = ""; this.previewErrors = {};
       try { storage().removeItem(HISTORY_KEY); } catch { this.notice = "无法更新会话存储，请检查浏览器存储权限。"; }
     },
-    cancel() { request?.abort(); },
+    cancel() { clearAuto(); selection++; request?.abort(); },
     async detect() {
-      if (!this.canSubmit) return;
+      if (disposed || !this.canSubmit) return;
+      clearAuto();
       this.error = "";
       if (!this.token.trim()) { this.accessOpen = true; this.error = "请在访问设置中填写 API Token，再开始检测。"; return; }
       if (!this.rememberToken(false)) return;
       let sourceURL = "";
       try { if (this.mode === "url") sourceURL = imageURL(this.url); } catch (error) { this.error = error.message; return; }
+      lastSubmittedSource = this.sourceKey();
+      const version = selection;
       const kind = this.mode === "url" ? "url" : this.fileKind;
       const entry = {
         id: browser.crypto.randomUUID(), time: Date.now(), duration: 0, kind,
@@ -185,12 +224,13 @@ export function createImageFilterApp(browser = window) {
       } finally {
         browser.clearTimeout(timer); request = null;
         if (!disposed) {
-          if (kind !== "url" && !entry.thumbnail) entry.thumbnail = this.pendingThumbnail;
+          if (kind !== "url" && version === selection && !entry.thumbnail) entry.thumbnail = this.pendingThumbnail;
           entry.duration = browser.performance.now() - started;
           this.history = [entry, ...this.history].slice(0, HISTORY_LIMIT);
           this.previewErrors = Object.fromEntries(this.history.filter((item) => this.previewErrors[item.id]).map((item) => [item.id, true]));
           this.activeID = entry.id; this.previewFailed = false; this.historyFilter = "all";
           this.persistHistory(); this.busy = false;
+          if (autoPending) this.autoDetect();
         }
       }
     },

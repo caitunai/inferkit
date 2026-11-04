@@ -19,24 +19,24 @@
       <div class="credential-field"><label class="sr-only" for="api-token">API Token</label><input id="api-token" type="password" x-model="token" @input="tokenExpiresAt = 0" placeholder="粘贴 API Token" autocomplete="off" spellcheck="false" :disabled="busy"><button type="button" class="button button-ghost" @click="forgetToken()" :disabled="busy || !token.trim()">清除</button><button type="button" class="button button-primary" @click="rememberToken()" :disabled="busy || !token.trim()">保存</button></div>
     </section>
 
-    <div class="page-heading"><div><p class="eyebrow">图片分类工作台</p><h1>让每张图片，都有明确的判断。</h1><p class="page-description">粘贴一张图片，或输入图片链接，查看分类与置信度。</p></div><span class="session-badge"><span></span> 当前标签页会话</span></div>
+    <div class="page-heading"><div><p class="eyebrow">图片分类工作台</p><h1>让每张图片，都有明确的判断。</h1><p class="page-description">粘贴、上传图片或输入完整图片链接，即可自动检测。</p></div><span class="session-badge"><span></span> 当前标签页会话</span></div>
 
     <div class="grid grid-cols-1 gap-6 lg:grid-cols-2 workbench">
       <section class="surface input-panel" aria-labelledby="input-heading">
         <div class="panel-heading"><div class="heading-with-step"><span class="step">01</span><h2 id="input-heading">添加图片</h2></div><span class="muted small">JPEG · WebP · AVIF · PNG</span></div>
         <div class="input-content">
           <div class="mode-tabs" role="tablist" aria-label="图片来源">
-            <button type="button" role="tab" :aria-selected="mode === 'file'" :class="mode === 'file' && 'selected'" @click="selectMode('file')" :disabled="busy" aria-controls="file-panel">粘贴 / 上传图片</button>
-            <button type="button" role="tab" :aria-selected="mode === 'url'" :class="mode === 'url' && 'selected'" @click="selectMode('url')" :disabled="busy" aria-controls="url-panel">图片 URL</button>
+            <button type="button" role="tab" :aria-selected="mode === 'file'" :class="mode === 'file' && 'selected'" @click="selectMode('file')" aria-controls="file-panel">粘贴 / 上传图片</button>
+            <button type="button" role="tab" :aria-selected="mode === 'url'" :class="mode === 'url' && 'selected'" @click="selectMode('url')" aria-controls="url-panel">图片 URL</button>
           </div>
           <form @submit.prevent="detect()">
             <div id="file-panel" role="tabpanel" x-show="mode === 'file'">
-              <input class="sr-only" x-ref="fileInput" type="file" accept="image/jpeg,image/webp,image/avif,image/png,.jpg,.jpeg,.webp,.avif,.png" @change="onFileInput($event)" :disabled="busy" aria-label="选择图片文件">
-              <div class="dropzone" :class="[dragging && 'dragging', preview && 'has-preview']" @dragover.prevent="dragging = !busy" @dragleave.prevent="dragging = false" @drop.prevent="onDrop($event)">
+              <input class="sr-only" x-ref="fileInput" type="file" accept="image/jpeg,image/webp,image/avif,image/png,.jpg,.jpeg,.webp,.avif,.png" @change="onFileInput($event)" aria-label="选择图片文件">
+              <div class="dropzone" :class="[dragging && 'dragging', preview && 'has-preview']" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop($event)">
                 <div x-show="!preview" class="dropzone-empty">
                   <span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="5" y="5" width="22" height="22" rx="5" stroke="currentColor" stroke-width="1.5"/><path d="m6 23 7-7 5 5 4-5 5 6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg></span>
                   <h3>把图片粘贴到这里</h3><p>也可以拖入图片，或从设备中选择</p>
-                  <button type="button" class="button button-secondary" @click="$refs.fileInput.click()" :disabled="busy">选择图片 <span aria-hidden="true">↗</span></button>
+                  <button type="button" class="button button-secondary" @click="$refs.fileInput.click()">选择图片 <span aria-hidden="true">↗</span></button>
                   <span class="paste-shortcut"><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>V</kbd> 粘贴图片</span>
                 </div>
                 <div x-show="preview" class="selected-image"><img :src="preview || undefined" alt="待检测的图片"><button type="button" class="remove-image" @click="clearFile()" :disabled="busy" aria-label="移除当前图片">×</button></div>
@@ -45,17 +45,17 @@
             </div>
             <div id="url-panel" role="tabpanel" x-show="mode === 'url'" class="url-panel">
               <span class="url-symbol" aria-hidden="true">↗</span><h3>从链接获取图片</h3><p>输入可以公开访问的图片地址</p>
-              <label for="image-url">图片 URL</label><input id="image-url" type="url" x-model="url" placeholder="https://example.com/image.jpg" autocomplete="off" spellcheck="false" maxlength="8192" :disabled="busy">
-              <p class="url-help">支持 HTTP / HTTPS，图片会由服务器下载后检测。</p>
+              <label for="image-url">图片 URL</label><input id="image-url" type="url" x-model="url" @input="onURLInput($event.target.value, $event.isComposing)" @compositionend="onURLInput($event.target.value)" placeholder="https://example.com/image.jpg" autocomplete="off" spellcheck="false" maxlength="8192">
+              <p class="url-help">支持 HTTP / HTTPS，输入完整地址并停止输入后自动检测。</p>
             </div>
-            <div class="form-footer"><span class="small muted" x-show="!busy">原始图片不会写入检测历史</span><span class="small processing" x-show="busy"><span class="spinner"></span>正在检测，请稍候…</span><div class="submit-actions"><button x-show="busy" type="button" class="button button-secondary" @click="cancel()">取消</button><button class="button button-primary detect-button" type="submit" :disabled="!canSubmit"><span x-text="busy ? '检测中…' : '开始检测'"></span><span x-show="!busy" aria-hidden="true">→</span></button></div></div>
+            <div class="form-footer"><span class="small muted" x-show="!busy">添加图片后自动检测</span><span class="small processing" x-show="busy"><span class="spinner"></span>正在检测，请稍候…</span><div class="submit-actions"><button x-show="busy" type="button" class="button button-secondary" @click="cancel()">取消</button><button class="button button-primary detect-button" type="submit" :disabled="!canSubmit"><span x-text="busy ? '检测中…' : '重新检测'"></span><span x-show="!busy" aria-hidden="true">→</span></button></div></div>
           </form>
         </div>
       </section>
 
       <section class="surface result-panel" aria-labelledby="result-heading" aria-live="polite" :aria-busy="busy">
         <div class="panel-heading"><div class="heading-with-step"><span class="step">02</span><h2 id="result-heading">检测结果</h2></div><span class="small muted" x-show="active && !busy" x-text="active ? timeLabel(active.time) : ''"></span></div>
-        <div class="result-empty" x-show="!active && !busy"><span class="result-empty-icon" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M14 5H7a2 2 0 0 0-2 2v7m21-9h7a2 2 0 0 1 2 2v7M5 26v7a2 2 0 0 0 2 2h7m21-9v7a2 2 0 0 1-2 2h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m13 20 5 5 10-11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h3>准备好查看结果了吗？</h3><p>添加图片并开始检测，分类结果会显示在这里。</p><span class="result-example"><span></span> 类别判断 <i>·</i> 置信度 <i>·</i> 分类概率</span></div>
+        <div class="result-empty" x-show="!active && !busy"><span class="result-empty-icon" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M14 5H7a2 2 0 0 0-2 2v7m21-9h7a2 2 0 0 1 2 2v7M5 26v7a2 2 0 0 0 2 2h7m21-9v7a2 2 0 0 1-2 2h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m13 20 5 5 10-11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span><h3>准备好查看结果了吗？</h3><p>添加图片后自动检测，分类结果会显示在这里。</p><span class="result-example"><span></span> 类别判断 <i>·</i> 置信度 <i>·</i> 分类概率</span></div>
         <div class="result-empty" x-show="busy"><span class="loading-ring"></span><h3>正在分析图片</h3><p>检测完成后，结果将自动加入本次历史。</p></div>
         <div class="result-content" x-show="active && !busy">
           <div class="result-overview"><div class="result-thumb"><img x-show="previewSource && !previewFailed" :src="previewSource || undefined" @error="previewFailed = true" alt="历史图片预览" referrerpolicy="no-referrer"><svg x-show="!previewSource || previewFailed" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="1.4"/><path d="m4 17 5-5 4 4 3-4 5 5" stroke="currentColor" stroke-width="1.4"/></svg></div><div class="result-source"><span class="eyebrow" x-text="active ? sourceLabel(active.kind) : ''"></span><h3 class="truncate" x-text="active?.name" :title="active?.name"></h3><span class="small muted" x-text="active ? `总耗时 ${durationLabel(active.duration)}` : ''"></span></div></div>
