@@ -3,10 +3,7 @@ package cmd
 import (
 	"encoding/json/v2"
 	"errors"
-	"net/url"
-	"os"
 
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -71,49 +68,5 @@ func runImageFilter(cmd *cobra.Command, args []string) error {
 }
 
 func writeImageResults(cmd *cobra.Command, service *imagefilter.Service, args []string) error {
-	for _, source := range args {
-		result, checkErr := checkImageArgument(cmd, service, source)
-		if checkErr != nil {
-			return checkErr
-		}
-		if err := json.MarshalWrite(cmd.OutOrStdout(), result); err != nil {
-			return errors.Join(ErrImageFilterCommand, err)
-		}
-		if _, err := cmd.OutOrStdout().Write([]byte("\n")); err != nil {
-			return errors.Join(ErrImageFilterCommand, err)
-		}
-	}
-	return nil
-}
-
-func checkImageArgument(cmd *cobra.Command, service *imagefilter.Service, source string) (imagefilter.Result, error) {
-	input, cleanup, err := openImageArgument(source)
-	if err != nil {
-		return imagefilter.Result{}, err
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-	result, err := service.Check(cmd.Context(), input)
-	if err != nil {
-		return imagefilter.Result{}, errors.Join(ErrImageFilterCommand, err)
-	}
-	return result, nil
-}
-
-func openImageArgument(source string) (imagefilter.Source, func(), error) {
-	u, err := url.Parse(source)
-	if err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-		return imagefilter.Source{URL: source}, nil, nil
-	}
-	file, err := os.Open(source) //nolint:gosec // CLI users explicitly select local image files; HTTP never reaches this path.
-	if err != nil {
-		return imagefilter.Source{}, nil, errors.Join(ErrImageFilterCommand, err)
-	}
-	cleanup := func() {
-		if closeErr := file.Close(); closeErr != nil {
-			log.Warn().Err(closeErr).Msg("close image file")
-		}
-	}
-	return imagefilter.Source{Reader: file}, cleanup, nil
+	return writeSourceResults(cmd, args, ErrImageFilterCommand, service.Check)
 }

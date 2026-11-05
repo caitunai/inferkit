@@ -22,10 +22,16 @@
 !services/**
 !xutil/
 !xutil/**
+!deploy/
+deploy/**
+!deploy/licenses/
+!deploy/licenses/png-LICENSE.txt
+!deploy/licenses/libvips-LICENSE.txt
 !scripts/
 scripts/**
 !scripts/prepare-onnxruntime-linux.sh
 !scripts/check-onnxruntime-api.sh
+!scripts/prepare-image-linux.sh
 !storage/
 storage/**
 !storage/*.go

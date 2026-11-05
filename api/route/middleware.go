@@ -246,3 +246,14 @@ func login(c *base.Context) {
 		"result": "you are not implement the login function",
 	})
 }
+
+// PageNavigation exposes only initialized feature links to shared page templates.
+func PageNavigation(filter, recognizer, review bool) base.HandlerFunc {
+	return func(c *base.Context) {
+		c.Set("navigation.image_filter", filter)
+		c.Set("navigation.ocr", recognizer)
+		c.Set("navigation.image_review", review)
+		c.Set("navigation.config_center", configCenterIsEnabled)
+		c.Next()
+	}
+}

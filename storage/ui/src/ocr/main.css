@@ -1,0 +1,23 @@
+@import "tailwindcss";
+@import "../shared/workbench.css";
+
+.ocr-workbench { align-items: start; }
+.ocr-result-body { padding: 20px 24px 24px; }
+.ocr-copy { min-height: 30px; padding-inline: 11px; font-size: 11px; }
+.ocr-processing { display: flex; align-items: center; gap: 10px; padding: 16px 24px; color: #607e64; font-size: 12px; background: #f5f8f3; border-bottom: 1px solid #e7eee3; }
+.ocr-empty { min-height: 420px; }
+.ocr-empty-mark { display: grid; place-items: center; width: 74px; height: 74px; margin-bottom: 23px; border: 1px solid #e4ebe1; border-radius: 21px; background: #f7faf5; color: #9cab96; font-size: 31px; font-weight: 300; }
+.ocr-result-meta { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 16px; font-size: 10px; color: #98a095; }
+.ocr-result-meta > :first-child { min-width: 0; }.ocr-result-meta > :last-child { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.ocr-result-tabs { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid #edf0ea; margin-bottom: 14px; padding-bottom: 10px; }
+.ocr-result-tabs button { padding: 7px 11px; border-radius: 6px; color: #8a9685; background: transparent; border: 0; font-size: 12px; }
+.ocr-result-tabs button.selected { color: #34533a; background: #f0f5ed; font-weight: 600; }.ocr-result-tabs button > span { font-size: 10px; margin-left: 4px; opacity: .65; }
+.ocr-dimensions { margin-left: auto; color: #9eaa98; font: 10px ui-monospace, monospace; white-space: nowrap; }
+.ocr-text { display: block; width: 100%; min-height: 220px; max-height: 520px; padding: 14px 16px; border: 1px solid #e6eae3; border-radius: 8px; background: #fafcf8; color: #43513d; font: 13px/1.9 ui-sans-serif, system-ui, "PingFang SC", sans-serif; resize: vertical; overflow-wrap: anywhere; }.ocr-text::placeholder { color: #a6afa1; }.ocr-text:focus-visible { outline: 3px solid #b8c7fa; outline-offset: 2px; }
+.ocr-lines { min-height: 220px; max-height: 320px; overflow-y: auto; border: 1px solid #e6eae3; border-radius: 8px; }.ocr-line { display: flex; align-items: start; gap: 10px; width: 100%; padding: 11px 12px; text-align: left; border: 0; border-bottom: 1px solid #eff2ec; color: #52604b; background: #fff; }.ocr-line:hover, .ocr-line.selected { background: #f0f6eb; }.ocr-line-index { padding-top: 2px; color: #a4af9d; font: 10px/1.8 ui-monospace, monospace; }.ocr-line-text { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.8; }.ocr-line-confidence { color: #8a9c7e; font: 10px/2 ui-monospace, monospace; white-space: nowrap; }.ocr-no-text { padding: 20px; color: #9ca893; font-size: 12px; }
+.ocr-image-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block: 20px 10px; font-size: 11px; color: #8a9684; }.ocr-image-heading label { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; }.ocr-image-heading input { accent-color: #607e54; }
+.ocr-result-preview { position: relative; display: grid; place-items: center; height: 300px; border: 1px solid #e5eae2; border-radius: 8px; background: repeating-conic-gradient(#f4f6f1 0% 25%, #fbfcf9 0% 50%) 50% / 16px 16px; overflow: hidden; }.ocr-result-preview > img { width: 100%; height: 100%; object-fit: contain; }.ocr-boxes { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }.ocr-boxes polygon { fill: #55864712; stroke: #608449; stroke-width: 1.4; vector-effect: non-scaling-stroke; pointer-events: all; cursor: pointer; }.ocr-boxes polygon:hover, .ocr-boxes polygon.selected { fill: #e8b65e55; stroke: #c88a2d; stroke-width: 2; }.ocr-preview-fallback { padding: 24px; color: #9ba792; font-size: 12px; line-height: 1.9; text-align: center; }
+.ocr-history-image { aspect-ratio: 16 / 10; }.ocr-history-excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-height: 38px; margin-top: 10px; color: #98a18e; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; white-space: pre-line; }
+@media (max-width: 640px) { .ocr-result-body { padding: 18px; }.ocr-result-preview { height: 230px; }.ocr-empty { min-height: 300px; }.ocr-line { gap: 7px; }.ocr-dimensions { font-size: 9px; } }
+
+.ocr-box-layer { position: absolute; inset: 0; pointer-events: none; }

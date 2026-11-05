@@ -1,13 +1,7 @@
+import { createAutoSubmit } from "../shared/auto-submit.js";
+import { supportedImageFile } from "../shared/image.js";
 import { HISTORY_LIMIT, HISTORY_KEY, THUMBNAIL_LIMIT, imageURL, labelTitle, loadHistory, percent, readResult, saveHistory } from "./history.js";
 import { TOKEN_KEY, cleanToken, credentialExpired, loadCredential, saveCredential } from "./credential.js";
-
-const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
-const URL_DEBOUNCE_MS = 600;
-
-function supportedImageFile(file) {
-  const type = String(file.type || "").toLowerCase();
-  return IMAGE_TYPES.has(type) || ((!type || type === "application/octet-stream") && /\.(jpe?g|webp|avif|png)$/i.test(file.name || ""));
-}
 
 async function thumbnail(file, browser) {
   const bitmap = await browser.createImageBitmap(file);
@@ -34,14 +28,8 @@ export function createImageFilterApp(browser = window) {
   let request = null;
   let disposed = false;
   let selection = 0;
-  let autoTimer = null;
-  let autoPending = false;
-  let lastSubmittedSource = "";
-  const clearAuto = () => {
-    browser.clearTimeout(autoTimer);
-    autoTimer = null;
-    autoPending = false;
-  };
+  const automatic = createAutoSubmit(browser, (page) => page.detect());
+  const clearAuto = automatic.cancel;
   const releasePreview = () => {
     if (objectURL) browser.URL.revokeObjectURL(objectURL);
     objectURL = "";
@@ -66,7 +54,7 @@ export function createImageFilterApp(browser = window) {
         this.tokenExpiresAt = credential?.expiresAt || 0;
       } catch { this.credentialNotice = "浏览器未开放本地存储，Token 仅保留在当前页面。"; }
     },
-    destroy() { disposed = true; selection++; clearAuto(); request?.abort(); releasePreview(); },
+    destroy() { disposed = true; selection++; automatic.destroy(); request?.abort(); releasePreview(); },
     get active() { return this.history.find((item) => item.id === this.activeID) || null; },
     get result() { return this.active?.result || null; },
     get successCount() { return this.history.filter((item) => item.result).length; },
@@ -101,19 +89,9 @@ export function createImageFilterApp(browser = window) {
     },
     onURLInput(value, composing = false) {
       this.url = value; this.error = ""; clearAuto();
-      if (disposed || composing || !this.sourceKey()) return;
-      autoTimer = browser.setTimeout(() => {
-        autoTimer = null;
-        this.autoDetect();
-      }, URL_DEBOUNCE_MS);
+      automatic.schedule(this, composing);
     },
-    autoDetect() {
-      const key = this.sourceKey();
-      if (disposed || !key || key === lastSubmittedSource) return;
-      if (this.busy) { autoPending = true; return; }
-      autoPending = false;
-      return this.detect();
-    },
+    autoDetect() { return automatic.attempt(this); },
     async selectFile(value, kind = "file") {
       if (!value || disposed) return;
       clearAuto();
@@ -168,7 +146,7 @@ export function createImageFilterApp(browser = window) {
       return true;
     },
     forgetToken() {
-      clearAuto(); lastSubmittedSource = "";
+      automatic.reset();
       this.token = ""; this.tokenExpiresAt = 0; this.credentialNotice = "";
       try { browser.localStorage.removeItem(TOKEN_KEY); } catch { this.credentialNotice = "无法清除浏览器保存的 Token，请检查存储权限。"; }
     },
@@ -191,7 +169,7 @@ export function createImageFilterApp(browser = window) {
       if (!this.rememberToken(false)) return;
       let sourceURL = "";
       try { if (this.mode === "url") sourceURL = imageURL(this.url); } catch (error) { this.error = error.message; return; }
-      lastSubmittedSource = this.sourceKey();
+      automatic.started(this);
       const version = selection;
       const kind = this.mode === "url" ? "url" : this.fileKind;
       const entry = {
@@ -230,7 +208,7 @@ export function createImageFilterApp(browser = window) {
           this.previewErrors = Object.fromEntries(this.history.filter((item) => this.previewErrors[item.id]).map((item) => [item.id, true]));
           this.activeID = entry.id; this.previewFailed = false; this.historyFilter = "all";
           this.persistHistory(); this.busy = false;
-          if (autoPending) this.autoDetect();
+          automatic.finished(this);
         }
       }
     },

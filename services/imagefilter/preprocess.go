@@ -1,151 +1,129 @@
 package imagefilter
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"image"
-	"image/draw"
-	_ "image/jpeg" // Register supported image decoders.
-	_ "image/png"
 	"math"
-	"slices"
 
-	"github.com/gen2brain/gav1d/av1"
-	"github.com/gen2brain/gav1d/avif"
-
-	_ "golang.org/x/image/webp" // Register WebP, including lossless alpha images.
+	"github.com/caitun/inferkit/services/imageinput"
+	"github.com/caitun/inferkit/services/imagetiming"
 )
 
-const formatAVIF = "avif"
-
 func preprocess(ctx context.Context, data []byte, maxPixels int64, dst []float32) error {
-	img, err := decodeImage(data, maxPixels)
+	return preprocessNative(ctx, data, maxPixels, dst)
+}
+
+func preprocessWithBudget(ctx context.Context, data []byte, maxPixels int64, dst []float32, reserve func() preparationLease) error {
+	done := imagetiming.Measure(ctx, imagetiming.Decode)
+	img, err := decodeImage(ctx, data, maxPixels)
 	if err != nil {
+		done(err)
 		return err
 	}
 	if err = ctx.Err(); err != nil {
+		done(err)
 		return errors.Join(ErrInput, err)
 	}
+	done(nil)
 	b := img.Bounds()
+	if trace := imagetiming.From(ctx); trace != nil {
+		trace.Image(b.Dx(), b.Dy(), pixelType(img))
+	}
+	done = imagetiming.Measure(ctx, imagetiming.Preprocess)
 	scale := min(float64(imageSize)/float64(b.Dx()), float64(imageSize)/float64(b.Dy()))
 	w := max(1, min(imageSize, int(math.RoundToEven(float64(b.Dx())*scale))))
 	h := max(1, min(imageSize, int(math.RoundToEven(float64(b.Dy())*scale))))
-	rgba := toRGBA(img)
-	resized := resizeRGBA(rgba, w, h)
+	err = prepareTensor(ctx, img, w, h, dst, reserve)
+	done(err)
+	return err
+}
+
+func prepareTensor(ctx context.Context, img image.Image, w, h int, dst []float32, reserve func() preparationLease) error {
+	done := imagetiming.Measure(ctx, imagetiming.Convert)
+	rgba := decodedPixels(img)
+	done(nil)
+	done = imagetiming.Measure(ctx, imagetiming.Resize)
+	resized, err := resizeWithBudget(ctx, rgba, w, h, reserve)
+	done(err)
+	if err != nil {
+		return err
+	}
+	done = imagetiming.Measure(ctx, imagetiming.Tensor)
 	writeTensor(resized, dst)
+	done(nil)
 	return nil
 }
 
-func decodeImage(data []byte, maxPixels int64) (image.Image, error) {
-	config, format, err := imageConfig(data)
+func decodeImage(ctx context.Context, data []byte, maxPixels int64) (image.Image, error) {
+	img, format, decoder, err := imageinput.DecodeWithBackend(data, maxPixels)
+	if trace := imagetiming.From(ctx); trace != nil {
+		trace.Format(format)
+		trace.Decoder(decoder)
+	}
 	if err != nil {
-		return nil, err
-	}
-	if !slices.Contains([]string{"jpeg", "png", "webp", formatAVIF}, format) {
-		return nil, ErrInput
-	}
-	if err = validateDimensions(config, maxPixels); err != nil {
-		return nil, err
-	}
-	img, err := decodePixels(data, format, maxPixels)
-	if err != nil {
-		return nil, err
-	}
-	if orientation := exifOrientation(data, format); orientation != 1 {
-		img = orientedImage{source: img, orientation: orientation}
+		return nil, errors.Join(ErrPreprocess, err)
 	}
 	return img, nil
-}
-
-func imageConfig(data []byte) (image.Config, string, error) {
-	// AVIF may use the generic mif1/msf1 major brand. Let its container parser
-	// validate the compatible brands and AV1 primary item instead of suffixes.
-	if len(data) >= 12 && string(data[4:8]) == "ftyp" {
-		config, err := avif.DecodeConfig(bytes.NewReader(data))
-		if err != nil {
-			return image.Config{}, "", errors.Join(ErrInput, err)
-		}
-		return config, formatAVIF, nil
-	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return image.Config{}, "", errors.Join(ErrInput, err)
-	}
-	return config, format, nil
-}
-
-func decodePixels(data []byte, format string, maxPixels int64) (image.Image, error) {
-	if format == formatAVIF {
-		// Also bound coded AV1 frames/tiles, whose dimensions may differ from
-		// the container header. Container transforms are applied exactly once.
-		img, err := avif.Decode(bytes.NewReader(data), avif.Options{AutoRotate: true, FrameSizeLimit: int(maxPixels)})
-		if errors.Is(err, av1.ErrFrameTooLarge) {
-			return nil, errors.Join(ErrTooLarge, err)
-		}
-		if err != nil {
-			return nil, errors.Join(ErrInput, err)
-		}
-		return img, nil
-	}
-	img, _, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return nil, errors.Join(ErrInput, err)
-	}
-	return img, nil
-}
-
-func validateDimensions(config image.Config, maxPixels int64) error {
-	if config.Width < 1 || config.Height < 1 || config.Width > maxImageDimension || config.Height > maxImageDimension {
-		return ErrTooLarge
-	}
-	if int64(config.Width) > maxPixels/int64(config.Height) {
-		return ErrTooLarge
-	}
-	return nil
 }
 
 // Pillow filters 8-bit premultiplied RGBA, clips between separable passes,
 // then unpremultiplies with integer division before compositing onto white.
-func toRGBA(img image.Image) *image.NRGBA {
-	b := img.Bounds()
-	dst := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src)
-	return dst
-}
-
-func resizeRGBA(src *image.NRGBA, w, h int) *image.NRGBA {
+func resizeRGBA(ctx context.Context, src *image.NRGBA, w, h, workers int) (*image.NRGBA, error) {
 	if src.Bounds().Dx() == w && src.Bounds().Dy() == h {
-		return src
+		return src, nil
 	}
-	premultiply(src)
-	resized := resampleAxis(src, w, false)
-	resized = resampleAxis(resized, h, true)
-	unpremultiply(resized)
-	return resized
+	if err := timedImageRows(ctx, src, workers, premultiplyPixels, imagetiming.Premultiply); err != nil {
+		return nil, err
+	}
+	resized, err := resampleAxis(ctx, src, w, false, workers)
+	if err != nil {
+		return nil, err
+	}
+	resized, err = resampleAxis(ctx, resized, h, true, workers)
+	if err != nil {
+		return nil, err
+	}
+	if err = timedImageRows(ctx, resized, workers, unpremultiplyPixels, imagetiming.Unpremultiply); err != nil {
+		return nil, err
+	}
+	return resized, nil
 }
 
 func premultiply(src *image.NRGBA) {
-	for i := 0; i < len(src.Pix); i += 4 {
+	premultiplyPixels(src.Pix)
+}
+
+func premultiplyPixels(pixels []byte) {
+	for i := 0; i < len(pixels); i += 4 {
+		if pixels[i+3] == pixelMax {
+			continue
+		}
 		for c := range channels {
-			src.Pix[i+c] = byte((int(src.Pix[i+c])*int(src.Pix[i+3]) + 127) / pixelMax) //nolint:gosec // Product of two bytes divided by 255 is in [0,255].
+			pixels[i+c] = byte((int(pixels[i+c])*int(pixels[i+3]) + 127) / pixelMax) //nolint:gosec // Product of two bytes divided by 255 is in [0,255].
 		}
 	}
 }
 
-func unpremultiply(resized *image.NRGBA) {
-	for i := 0; i < len(resized.Pix); i += 4 {
-		a := int(resized.Pix[i+3])
+func unpremultiplyPixels(pixels []byte) {
+	for i := 0; i < len(pixels); i += 4 {
+		a := int(pixels[i+3])
 		if a == 0 || a == pixelMax {
 			continue
 		}
 		for c := range channels {
-			resized.Pix[i+c] = byte(min(pixelMax, int(resized.Pix[i+c])*pixelMax/a)) //nolint:gosec // Nonnegative byte product clamped to 255.
+			pixels[i+c] = byte(min(pixelMax, int(pixels[i+c])*pixelMax/a)) //nolint:gosec // Nonnegative byte product clamped to 255.
 		}
 	}
 }
 
 func writeTensor(img *image.NRGBA, dst []float32) {
+	if !tensorSIMD(img, dst) {
+		writeTensorScalar(img, dst)
+	}
+}
+
+func writeTensorScalar(img *image.NRGBA, dst []float32) {
 	for i := range dst {
 		dst[i] = 1
 	}

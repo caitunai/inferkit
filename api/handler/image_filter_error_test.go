@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bytes"
-	"encoding/json/v2"
 	"errors"
 	"net"
 	"net/http"
@@ -31,10 +30,7 @@ func TestDNSFailureIsLoggedWithoutSignedURL(t *testing.T) {
 	if response.Code != http.StatusBadGateway || !strings.Contains(response.Body.String(), imageCodeDNS) {
 		t.Fatalf("missing actionable DNS response: %d %s", response.Code, response.Body)
 	}
-	var fields map[string]any
-	if err := json.Unmarshal(buffer.Bytes(), &fields); err != nil {
-		t.Fatal(err)
-	}
+	fields := imageLogFields(t, &buffer, "image filter request failed")
 	if fields["stage"] != "resolve" || fields["dns_host"] != sourceHost || fields["source_host"] != sourceHost {
 		t.Fatalf("missing DNS diagnostics: %s", &buffer)
 	}

@@ -1,10 +1,13 @@
 # Debian 13 amd64 Docker 部署
 
+当前镜像默认包含新模型所需的完整 libvips 流水线，详见 [当前模型说明](LIBVIPS_MODEL_PIPELINE.md)。
+
+
 镜像基于官方 `debian:trixie-slim`（Debian 13），仅支持 `linux/amd64`。每次 Actions 构建会拉取最新基础镜像，跟进 Debian 13 的点版本；不使用可能在未来切换到 Debian 14 的 `debian:latest`。
 
 Debian 13 是容器内的运行环境，宿主机可以继续使用 Debian 11；原生库使用容器内的 glibc，而非宿主机 glibc。宿主机需具备可用的 amd64 Docker Engine 和相应内核支持。
 
-前端由 Node 24 构建，随后嵌入 Go 二进制；Go 使用 `golang:1.27-trixie`、CGO 和 `GOAMD64=v1` 编译。镜像包含固定的 ONNX Runtime CPU 1.31.1 及其系统依赖，复用 Debian 11 部署的官方包下载与 SHA-256 校验，以及共享的 C API 版本核对脚本。业务推理继续仅使用 CPU。
+前端由 Node 24 构建，随后嵌入 Go 二进制；Go 使用 `golang:1.27-trixie`、CGO 和 `GOAMD64=v1` 编译。镜像包含固定的 ONNX Runtime CPU 1.31.1 及其系统依赖，复用 Debian 11 部署的官方包下载与 SHA-256 校验，以及共享的 C API 版本核对脚本。业务推理继续仅使用 CPU。默认启用 `WITH_VIPS=true` 及 Go 标准 SIMD，并在私有前缀构建固定的 libvips 8.18.7、libheif 1.23.7、dav1d 1.5.4、Highway 1.4.0；JPEG 使用 Debian libjpeg62-turbo。
 
 配置、训练模型、密钥和数据库内容通过外部配置或挂载提供。`.dockerignore` 使用构建输入白名单，排除 `.git`、本机 `.app.toml` / `.env`、模型权重、私钥、依赖目录和已有构建产物，避免它们进入镜像或 CI 构建缓存。
 
@@ -156,3 +159,24 @@ docker buildx build --pull --platform linux/amd64 --load -t inferkit:debian13 .
 当前开发环境没有 Docker CLI / Engine，未在本机实际构建或推送镜像。首次完整镜像构建与运行检查会在工作流提交、推送到 GitHub 后执行。
 
 实现参考：[Debian 13 发布信息](https://www.debian.org/releases/trixie/)、[Docker 构建后测试再推送](https://docs.docker.com/build/ci/github-actions/test-before-push/)、[GitHub 发布镜像到 GHCR](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)、[Docker Hub 与 GHCR 同时发布](https://docs.docker.com/build/ci/github-actions/push-multi-registries/)。
+
+## 启用 OCR
+
+OCR 模型准备与配置见 [OCR 文档](OCR.md)。镜像复用已安装的 ONNX Runtime；将模型目录以只读方式挂载到 `/models/ocr`，并在外部配置中设置 `image.ocr.enabled=true`、检测/识别模型及配套字典的容器内绝对路径。
+
+当前镜像默认启动 `image-filter serve`。要启用 OCR，请通过 Compose override 将服务命令改成现有 `serve`（需要现有 Redis/队列配置），例如：
+
+```yaml
+services:
+  inferkit:
+    command: ["--config", "/etc/inferkit/app.toml", "serve"]
+    volumes:
+      - type: bind
+        source: ./pp-ocrv6-medium
+        target: /models/ocr
+        read_only: true
+        bind:
+          create_host_path: false
+```
+
+配置中的模型路径使用 `/models/ocr/det.onnx`、`/models/ocr/rec.onnx`、`/models/ocr/dict.txt`；分类与OCR的 `library` 均配置为 `/opt/onnxruntime/lib/libonnxruntime.so.1`。如果只启用OCR，请清空 `image.filter.model`、移除不再需要的分类模型挂载，并将镜像健康检查路径从 `/image-filter` 改为 `/`。OCR不新增独立服务命令。

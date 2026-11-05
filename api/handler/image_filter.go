@@ -2,20 +2,16 @@ package handler
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
-	"io"
-	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/services/imagefilter"
+	"github.com/caitun/inferkit/services/imageinput"
 )
 
 // ImageChecker is the HTTP adapter's narrow inference contract.
@@ -29,151 +25,28 @@ type ImageRecorder interface {
 	Save(context.Context, imagefilter.Result) error
 }
 
+// ErrImageCheck identifies failed classification without changing its underlying error identity.
+var ErrImageCheck = errors.New("image check failed")
+
 // ErrImageResultSave identifies a failure to durably collect a URL result.
 var ErrImageResultSave = errors.New("save image prediction failed")
 
 // FilterImage accepts multipart file/url, JSON url, or form-encoded url.
 func FilterImage(service ImageChecker, recorder ImageRecorder) base.HandlerFunc {
 	maxBytes, timeout, maxRequests := service.Limits()
-	h := &imageFilterHandler{service: service, recorder: recorder, admission: make(chan struct{}, maxRequests), maxBytes: maxBytes, timeout: timeout}
-	return h.handle
-}
-
-type imageFilterHandler struct {
-	service   ImageChecker
-	recorder  ImageRecorder
-	admission chan struct{}
-	maxBytes  int64
-	timeout   time.Duration
-}
-
-func (h *imageFilterHandler) handle(c *base.Context) {
-	select {
-	case h.admission <- struct{}{}:
-		defer func() { <-h.admission }()
-	default:
-		imageFilterError(c, imagefilter.ErrBusy)
-		return
-	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), h.timeout)
-	defer cancel()
-	c.Request = c.Request.WithContext(ctx)
-	// Bound slow uploads as well as download, preprocessing and inference time.
-	if err := setImageReadDeadline(c, time.Now().Add(h.timeout)); err != nil {
-		imageFilterError(c, err)
-		return
-	}
-	defer clearImageReadDeadline(c)
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.maxBytes+(64<<10))
-	h.check(c)
-}
-
-func (h *imageFilterHandler) check(c *base.Context) {
-	source, cleanup, err := imageSource(c, h.maxBytes)
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if err != nil {
-		imageFilterError(c, err)
-		return
-	}
-	if parsed, parseErr := url.Parse(source.URL); parseErr == nil {
-		c.Set(imageSourceHostKey, parsed.Hostname())
-	}
-	result, err := h.service.Check(c.Request.Context(), source)
-	if err != nil {
-		imageFilterError(c, err)
-		return
-	}
-	result.URL = source.URL
-	if source.URL != "" && h.recorder != nil {
-		if err = h.recorder.Save(c.Request.Context(), result); err != nil {
-			imageFilterError(c, errors.Join(ErrImageResultSave, err))
-			return
+	check := func(ctx context.Context, source imageinput.Source) (imagefilter.Result, error) {
+		result, err := service.Check(ctx, source)
+		if err != nil {
+			return imagefilter.Result{}, errors.Join(ErrImageCheck, err)
 		}
-	}
-	c.Success(gin.H{"result": result})
-}
-
-func setImageReadDeadline(c *base.Context, deadline time.Time) error {
-	err := http.NewResponseController(c.Writer).SetReadDeadline(deadline)
-	if err != nil && !errors.Is(err, http.ErrNotSupported) {
-		return errors.Join(imagefilter.ErrInput, err)
-	}
-	return nil
-}
-
-func clearImageReadDeadline(c *base.Context) {
-	if err := setImageReadDeadline(c, time.Time{}); err != nil {
-		log.Debug().Err(err).Msg("reset image upload deadline")
-	}
-}
-
-func imageSource(c *base.Context, maxBytes int64) (imagefilter.Source, func(), error) {
-	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
-	if err != nil {
-		return imagefilter.Source{}, nil, imagefilter.ErrInput
-	}
-	switch mediaType {
-	case "multipart/form-data":
-		return multipartImage(c, maxBytes)
-	case "application/json":
-		var body struct {
-			URL string `json:"url"`
+		result.URL = source.URL
+		if err = saveImageResult(ctx, recorder, result); err != nil {
+			return imagefilter.Result{}, err
 		}
-		if err = json.UnmarshalRead(c.Request.Body, &body); err != nil {
-			return imagefilter.Source{}, nil, errors.Join(imagefilter.ErrInput, err)
-		}
-		return imagefilter.Source{URL: body.URL}, nil, nil
-	case "application/x-www-form-urlencoded":
-		if err = c.Request.ParseForm(); err != nil {
-			return imagefilter.Source{}, nil, errors.Join(imagefilter.ErrInput, err)
-		}
-		return imagefilter.Source{URL: c.Request.PostForm.Get("url")}, nil, nil
-	default:
-		return imagefilter.Source{}, nil, imagefilter.ErrInput
+		return result, nil
 	}
-}
-
-func multipartImage(c *base.Context, maxBytes int64) (imagefilter.Source, func(), error) {
-	// The parser may spill to disk; remove temporary files even after parse failure.
-	err := c.Request.ParseMultipartForm(1 << 20)
-	cleanup := func() { removeImageMultipart(c) }
-	if err != nil {
-		return imagefilter.Source{}, cleanup, errors.Join(imagefilter.ErrInput, err)
-	}
-	form := c.Request.MultipartForm
-	files := form.File["file"]
-	if len(files) > 1 || len(form.File) > 1 || len(form.Value["url"]) > 1 {
-		return imagefilter.Source{}, cleanup, imagefilter.ErrInput
-	}
-	source := imagefilter.Source{URL: c.Request.PostForm.Get("url")}
-	if len(files) == 0 {
-		return source, cleanup, nil
-	}
-	if files[0].Size > maxBytes {
-		return imagefilter.Source{}, cleanup, imagefilter.ErrTooLarge
-	}
-	file, err := files[0].Open()
-	if err != nil {
-		return imagefilter.Source{}, cleanup, errors.Join(imagefilter.ErrInput, err)
-	}
-	source.Reader = file
-	return source, func() { closeImageUpload(file); cleanup() }, nil
-}
-
-func closeImageUpload(file io.Closer) {
-	if err := file.Close(); err != nil {
-		log.Warn().Err(err).Msg("close image upload")
-	}
-}
-
-func removeImageMultipart(c *base.Context) {
-	if form := c.Request.MultipartForm; form != nil {
-		if err := form.RemoveAll(); err != nil {
-			log.Warn().Err(err).Msg("remove image upload temporary files")
-		}
-	}
+	h := &imageRequestHandler[imagefilter.Result]{check: check, report: imageFilterError, busy: imagefilter.ErrBusy, admission: make(chan struct{}, maxRequests), maxBytes: maxBytes, timeout: timeout}
+	return measuredImageFilter(h.handle)
 }
 
 func imageFilterError(c *base.Context, err error) {

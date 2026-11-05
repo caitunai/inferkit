@@ -18,7 +18,7 @@ func testDownloader(t *testing.T, timeout time.Duration) *Service {
 	c := Configuration(viper.New())
 	c.Timeout = timeout
 	c.MaxBytes = 3
-	service := &Service{config: c, http: newDownloader(c)}
+	service := &Service{config: c, http: newDownloader(c, executionPlan{concurrency: 1, requests: 2})}
 	t.Cleanup(service.http.GetClient().CloseIdleConnections)
 	return service
 }

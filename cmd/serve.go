@@ -12,6 +12,7 @@ import (
 	"github.com/caitun/inferkit/queue"
 	"github.com/caitun/inferkit/redis"
 	"github.com/caitun/inferkit/services/imagefilter"
+	"github.com/caitun/inferkit/services/ocr"
 )
 
 // ErrServeCommand indicates run serve command failed.
@@ -38,6 +39,16 @@ var serveCmd = &cobra.Command{
 			}
 			defer func() { returnErr = errors.Join(returnErr, filter.Close()) }()
 		}
+
+		var recognizer *ocr.Service
+		if viper.GetBool("image.ocr.enabled") {
+			var initErr error
+			recognizer, initErr = ocr.New(ocr.Configuration(viper.GetViper()))
+			if initErr != nil {
+				return errors.Join(ErrServeCommand, initErr)
+			}
+			defer func() { returnErr = errors.Join(returnErr, recognizer.Close()) }()
+		}
 		if err := redis.Init(cmd.Context()); err != nil {
 			return errors.Join(ErrServeCommand, err)
 		}
@@ -53,6 +64,7 @@ var serveCmd = &cobra.Command{
 			return errors.Join(ErrServeCommand, err)
 		}
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
+		s.OCR = recognizer
 		if setupErr := configureImageServer(cmd.Context(), s, filter); setupErr != nil {
 			return errors.Join(ErrServeCommand, setupErr)
 		}

@@ -5,19 +5,23 @@ import (
 	"errors"
 	"time"
 
+	"github.com/caitun/inferkit/services/imageinput"
+	"github.com/caitun/inferkit/services/onnx"
 	"github.com/spf13/viper"
 )
 
 const (
+	backendSIMD = "simd"
+	backendGo   = "go"
 	imageSize   = 320
 	channels    = 3
 	pixelMax    = 255
 	inputLength = channels * imageSize * imageSize
-	// Bound Lanczos coefficient memory even for extreme, thin image dimensions.
-	maxImageDimension = 32768
 )
 
 var (
+	// ErrSource identifies failures reading an image source.
+	ErrSource = errors.New("read image source failed")
 	// ErrConfig indicates invalid resource limits or model configuration.
 	ErrConfig = errors.New("invalid image filter configuration")
 	// ErrModel indicates an incompatible or damaged deployment package.
@@ -25,17 +29,17 @@ var (
 	// ErrRuntime indicates native runtime initialization or cleanup failure.
 	ErrRuntime = errors.New("image filter runtime failed")
 	// ErrInput indicates an unreadable or unsupported image.
-	ErrInput = errors.New("invalid image input")
+	ErrInput = imageinput.ErrInput
 	// ErrTooLarge indicates an encoded size or decoded pixel limit violation.
-	ErrTooLarge = errors.New("image exceeds configured limit")
+	ErrTooLarge = imageinput.ErrTooLarge
 	// ErrURL indicates an unsupported URL syntax or protocol.
-	ErrURL = errors.New("invalid image URL")
+	ErrURL = imageinput.ErrURL
 	// ErrDNS identifies failed or empty image-host DNS resolution.
-	ErrDNS = errors.New("image host DNS resolution failed")
+	ErrDNS = imageinput.ErrDNS
 	// ErrPreprocess identifies decoding, orientation, resizing or tensor preparation failures.
 	ErrPreprocess = errors.New("image preprocessing failed")
 	// ErrDownload indicates an unsuccessful HTTP fetch.
-	ErrDownload = errors.New("image download failed")
+	ErrDownload = imageinput.ErrDownload
 	// ErrBusy indicates that all admission slots are occupied.
 	ErrBusy = errors.New("image filter capacity exhausted")
 	// ErrClosed indicates that shutdown has started.
@@ -44,18 +48,18 @@ var (
 	ErrInference = errors.New("image inference failed")
 )
 
-// Config bounds CPU, network and memory use for one process-wide service.
+// Config specifies model assets, input bounds and result cache settings.
 type Config struct {
-	Model        string
-	Library      string
-	Timeout      time.Duration
-	CacheTTL     time.Duration
-	MaxBytes     int64
-	MaxPixels    int64
-	Concurrency  int
-	MaxRequests  int
-	Threads      int
-	CacheEntries int
+	Model              string
+	Library            string
+	Provider           string
+	CoreMLComputeUnits string
+	Timeout            time.Duration
+	CacheTTL           time.Duration
+	MaxBytes           int64
+	MaxPixels          int64
+	CacheEntries       int
+	BypassCache        bool
 }
 
 // Configuration reads image.filter after the root command merges configuration.
@@ -64,21 +68,18 @@ func Configuration(v *viper.Viper) Config {
 		Model: v.GetString("image.filter.model"), Library: v.GetString("image.filter.library"),
 		Timeout: 30 * time.Second, CacheTTL: 5 * time.Minute,
 		MaxBytes: 10 << 20, MaxPixels: 20_000_000,
-		Concurrency: 2, MaxRequests: 8, Threads: 1, CacheEntries: 1024,
+		CacheEntries: 1024,
 	}
 	readLimits(v, &c)
 	return c
 }
 
 func readLimits(v *viper.Viper, c *Config) {
-	ints := map[string]*int{
-		"concurrency": &c.Concurrency, "maxRequests": &c.MaxRequests,
-		"threads": &c.Threads, "cacheEntries": &c.CacheEntries,
-	}
-	for key, dst := range ints {
-		if v.IsSet("image.filter." + key) {
-			*dst = v.GetInt("image.filter." + key)
-		}
+	c.Provider = v.GetString("image.filter.provider")
+	c.CoreMLComputeUnits = v.GetString("image.filter.coremlComputeUnits")
+	c.BypassCache = v.GetBool("image.filter.bypassCache")
+	if v.IsSet("image.filter.cacheEntries") {
+		c.CacheEntries = v.GetInt("image.filter.cacheEntries")
 	}
 	for key, dst := range map[string]*int64{"maxBytes": &c.MaxBytes, "maxPixels": &c.MaxPixels} {
 		if v.IsSet("image.filter." + key) {
@@ -99,17 +100,7 @@ func (c Config) validate() error {
 	if c.CacheTTL <= 0 || c.CacheTTL > 24*time.Hour {
 		return ErrConfig
 	}
-	return errors.Join(c.validateCPU(), c.validateMemory())
-}
-
-func (c Config) validateCPU() error {
-	if c.Concurrency < 1 || c.Concurrency > 64 || c.MaxRequests < c.Concurrency || c.MaxRequests > 1024 {
-		return ErrConfig
-	}
-	if c.Threads < 1 || c.Threads > 256 {
-		return ErrConfig
-	}
-	return nil
+	return errors.Join(c.validateMemory(), (onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}).Validate())
 }
 
 func (c Config) validateMemory() error {

@@ -1,5 +1,8 @@
 # Debian 11 x86_64 原生 CPU 部署
 
+新模型所需完整 libvips 流水线、固定依赖及数值验收见 [当前模型说明](LIBVIPS_MODEL_PIPELINE.md)。
+
+
 目标为 Debian 11（bullseye）x86_64，直接运行 Go 二进制。推理使用 CPU，不需要 Python、PyTorch、CUDA、libavif 或 libwebp。图片解码沿用项目中的 Go 实现。
 
 ## 兼容结论
@@ -27,7 +30,9 @@
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-  build-essential ca-certificates curl git binutils libstdc++6 libgcc-s1
+  build-essential ca-certificates curl git binutils libstdc++6 libgcc-s1 \
+  cmake meson ninja-build nasm pkg-config libglib2.0-dev libexpat1-dev \
+  libjpeg62-turbo-dev libpng-dev libwebp-dev libexif-dev liblcms2-dev zlib1g-dev
 ```
 
 按 [Go 官方安装说明](https://go.dev/doc/install) 安装满足仓库 `go.mod` 的 Go 1.27 或更新版本。不要直接使用 Debian 11 仓库中的旧 Go。构建前端还需安装符合 Vite 要求的 Node.js：推荐 22.12+ 的 22.x 或更新 LTS；当前依赖也接受 20.19+ 的 20.x。运行服务器在拿到构建产物后不需要 Go、Node.js、npm 或 C 编译器。
@@ -47,6 +52,8 @@ bash scripts/build-debian11.sh /srv/builds/inferkit-debian11-amd64
 ```text
 dist/debian11-amd64/
 ├── inferkit
+├── image/              # 私有 libvips/libheif/dav1d/Highway和许可
+├── runtime-packages.txt # 目标机需要安装的系统运行库
 ├── onnxruntime/        # 完整官方 CPU 包，保留 lib/ 中的版本文件和符号链接
 ├── check-abi.sh
 ├── inferkit.service
@@ -73,9 +80,13 @@ ONNXRUNTIME_ARCHIVE=/path/to/onnxruntime-linux-x64-1.31.1.tgz \
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-  ca-certificates libstdc++6 libgcc-s1 binutils locales
+  ca-certificates libstdc++6 libgcc-s1 binutils locales \
+  libglib2.0-0 libexpat1 libjpeg62-turbo libpng16-16 libwebp6 \
+  libwebpmux3 libwebpdemux2 libexif12 liblcms2-2 zlib1g
 sudo localedef -i en_US -f UTF-8 en_US.UTF-8
 ```
+
+默认构建包含原生图片库，并通过 `GOEXPERIMENT=simd` 启用 Go 张量内核；libvips 8.18.7 与模型清单必须一致。
 
 将构建产物整体复制到 `/opt/inferkit`，同时将模型包复制到 `/opt/inferkit/models/artwork_fp32`。复制目录时保留符号链接，如使用 `cp -a` 或 `rsync -a`。不要只复制 `libonnxruntime.so` 这个链接而漏掉它指向的版本文件。
 
@@ -112,9 +123,7 @@ path="/var/lib/inferkit"
 [image.filter]
 model="/opt/inferkit/models/artwork_fp32"
 library="/opt/inferkit/onnxruntime/lib/libonnxruntime.so.1.31.1"
-concurrency=2
-threads=1
-maxRequests=8
+# CPU 线程、图片并发和请求容量根据机器资源自动分配。
 timeout="30s"
 maxBytes=10485760
 maxPixels=20000000
@@ -176,3 +185,8 @@ ONNXRUNTIME_TEST_ARCHIVE=/path/to/onnxruntime-linux-x64-1.31.1.tgz \
 ```
 
 当前开发环境为 macOS ARM64，未在此环境执行 Linux 二进制或实际启动 Debian systemd 服务；已检查官方库的 ELF 依赖，并验证校验失败拒绝发布、既有目录保护、错误架构和过新 ABI 拒绝等脚本行为。新 CI 需要推送后由 GitHub Actions 实际执行，目标服务器也应完成上述验收。
+
+
+## 图片检测与 OCR 自动资源分配
+
+启用 OCR 后，不再需要配置 `image.ocr.concurrency`、`image.ocr.threads` 或 `image.ocr.maxRequests`。程序在启动时根据可用 CPU、cgroup v1/v2 层级限额及内存预算自动分配，并行识别文字行，同时保留有限队列及超时背压。配置、日志字段、复测方法和资源变化后的重启要求见 [OCR 自动资源说明](OCR.md#cpu-与内存自动分配)。图片分类同样已改为自动分配，删除 `image.filter` 下的这三个旧执行参数，说明及复测方法见 [图片检测自动资源分配](GO_ONNX_SERVER.md#自动资源分配)。

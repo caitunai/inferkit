@@ -22,15 +22,18 @@ audience="inferkit-image-api"
 issuers=["inferkit"]
 
 [image.filter]
+# cpu 保持现有结果；auto 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。
+provider="cpu"
+coremlComputeUnits="ALL"
+# CPU threads, inference concurrency and request admission are automatic.
 model="/models/artwork_fp32"
 library="/opt/onnxruntime/lib/libonnxruntime.so.1"
 recordResults=false
-concurrency=2
-threads=1
-maxRequests=8
 timeout="30s"
 maxBytes=10485760
 maxPixels=20000000
+# Set true temporarily for performance comparisons; also disables in-flight coalescing.
+bypassCache=false
 cacheEntries=1024
 cacheTTL="5m"
 

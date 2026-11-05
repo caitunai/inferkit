@@ -7,10 +7,15 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+
+	"github.com/caitun/inferkit/services/imagepipeline"
 )
 
 // ErrValidation means fixture probabilities or image preprocessing differ from the export baseline.
 var ErrValidation = errors.New("image filter fixture validation failed")
+
+// Adjacent normalized bytes can differ by an extra float32 rounding unit.
+const tensorTolerance = float64(imagepipeline.MaxPixelError)/pixelMax + 1.0/(1<<23)
 
 type validationFile struct {
 	Samples []validationSample `json:"samples"`
@@ -31,6 +36,8 @@ type Validation struct {
 	TensorMaxError           float64 `json:"tensor_max_error"`
 	ProbabilityMaxError      float64 `json:"probability_max_error"`
 	ImageProbabilityMaxError float64 `json:"image_probability_max_error"`
+	TensorTolerance          float64 `json:"tensor_tolerance"`
+	TensorExact              bool    `json:"tensor_exact"`
 	Passed                   bool    `json:"passed"`
 }
 
@@ -125,7 +132,8 @@ func (s *Service) compareSample(ctx context.Context, slot *tensorSlot, input []b
 	imageError, imageOK := probabilityDifference(imageResult, sample, file)
 	return Validation{
 		Source: sample.SourceFile, TensorMaxError: maxError, ProbabilityMaxError: rawError,
-		ImageProbabilityMaxError: imageError, Passed: rawOK && imageOK && maxError == 0,
+		ImageProbabilityMaxError: imageError, TensorTolerance: tensorTolerance,
+		TensorExact: maxError == 0, Passed: rawOK && imageOK && maxError <= tensorTolerance,
 	}, nil
 }
 

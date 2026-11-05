@@ -46,3 +46,15 @@ for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".sm\\:grid-cols-
   if (!reviewCSS.includes(selector)) throw new Error(`Image review CSS is missing ${selector}`);
 }
 console.log("Verified image review gallery and single-image annotation styles.");
+
+const ocrEntry = manifest["src/ocr/main.js"];
+if (!ocrEntry?.css?.length) throw new Error("OCR entry is missing its stylesheet");
+const ocrCSS = (await Promise.all(ocrEntry.css.map((file) => readFile(resolve("dist", file), "utf8")))).join("\n");
+for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".sm\\:grid-cols-2{", ".xl\\:grid-cols-4{", ".sr-only{", ".ocr-result-preview", ".ocr-lines", ".ocr-text", ".ik-navigation"]) {
+  if (!ocrCSS.includes(selector)) throw new Error(`OCR CSS is missing ${selector}`);
+}
+for (const entry of ["src/config-center/main.js", "src/image-filter/main.js", "src/image-review/main.js"]) {
+  const css = (await Promise.all(manifest[entry].css.map((file) => readFile(resolve("dist", file), "utf8")))).join("\n");
+  if (!css.includes(".ik-navigation")) throw new Error(`Shared navigation CSS is missing for ${entry}`);
+}
+console.log("Verified OCR utilities and shared feature navigation.");

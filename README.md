@@ -6,6 +6,7 @@ The project template of Golang.
 - [第三方图片分类 API 接入文档](docs/IMAGE_FILTER_API.md)
 - [识别结果采集、筛选列表与逐张人工纠错](docs/IMAGE_REVIEW.md)
 - [Go CPU 部署、CLI 和浏览器检测工作台](docs/GO_ONNX_SERVER.md)
+- [新模型的完整 libvips 预处理与 Go SIMD 部署](docs/LIBVIPS_MODEL_PIPELINE.md)
 - [Debian 11 x86_64 原生 CPU 部署与 ONNX Runtime 兼容检查](docs/DEBIAN11_DEPLOYMENT.md)
 - [Debian 13 amd64 Docker 镜像、GitHub Actions 与 GHCR / Docker Hub 部署](docs/DOCKER_DEPLOYMENT.md)
 - [ONNX 模型部署协议](docs/ONNX_DEPLOYMENT.md)
@@ -579,3 +580,7 @@ atlas migrate apply --env local
 
 
 **Thanks**
+
+## OCR（PP-OCRv6 / Go + ONNX）
+
+新增 `ocr SOURCE [SOURCE...]` 和现有 `serve` 下的 `POST /api/image/ocr`，输入支持 JPEG、WebP、PNG、AVIF。默认部署模型为 PP-OCRv6 medium；检测、识别模型、配套字典和资源限制均可配置。模型准备、CLI/API调用和部署说明见 [OCR 文档](docs/OCR.md)。

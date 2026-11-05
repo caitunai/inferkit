@@ -1,6 +1,6 @@
 {{ define "content" }}
 <main x-data="imageReviewApp()" data-view="{{ if .review }}review{{ else }}list{{ end }}" x-cloak>
-  <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-filter">图片检测</a><a href="/image-review">识别记录</a><a :href="reviewLink">逐张标注 →</a></nav></div></header>
+  <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-review">识别记录</a><a :href="reviewLink">逐张标注 →</a></nav></div></header>
   <div class="review-width">
     <div class="review-heading"><h1 x-text="view === 'review' ? '逐张纠错标注' : '图片识别记录'"></h1></div>
     <form class="review-filters" @submit.prevent="applyFilters()" aria-label="识别结果筛选">

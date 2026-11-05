@@ -114,6 +114,8 @@ linters:
             - github.com/ThreeDotsLabs/watermill-redisstream
             - github.com/ThreeDotsLabs/watermill/message
             - golang.org/x/sync/errgroup
+            - golang.org/x/sync/semaphore
+            - golang.org/x/sys/unix
             - gorm.io/driver
             - github.com/go-sql-driver/mysql
             - gorm.io/gorm
@@ -123,6 +125,7 @@ linters:
             - golang.org/x/image/webp
             - github.com/gen2brain/gav1d/avif
             - github.com/gen2brain/gav1d/av1
+            - github.com/woozymasta/png
           deny:
             - pkg: reflect
               desc: Prefer type-safe code over reflection.

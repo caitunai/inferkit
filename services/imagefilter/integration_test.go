@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/viper"
 
+	"github.com/caitun/inferkit/services/resource"
 	"github.com/caitun/inferkit/xutil"
 )
 
@@ -29,7 +30,7 @@ func nativeConfig(tb testing.TB) Config {
 
 func TestNativeSupportedFormatSources(t *testing.T) {
 	s := nativeService(t)
-	formats := []string{"png", "jpeg", "webp", "avif"}
+	formats := fixtureFormats
 	files := make(map[string][]byte, len(formats))
 	for _, format := range formats {
 		files["/sample."+format] = formatFixture(t, "sample."+format)
@@ -79,7 +80,13 @@ func assertImageSourceParity(t *testing.T, s *Service, data []byte, url string) 
 
 func nativeService(tb testing.TB) *Service {
 	tb.Helper()
-	service, err := New(nativeConfig(tb))
+	c := nativeConfig(tb)
+	return nativeServiceWithPlan(tb, c, automaticPlan(c, resource.Detect()))
+}
+
+func nativeServiceWithPlan(tb testing.TB, c Config, plan executionPlan) *Service {
+	tb.Helper()
+	service, err := newWithPlan(c, plan)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -93,7 +100,21 @@ func nativeService(tb testing.TB) *Service {
 
 func nativeImage(tb testing.TB, s *Service) []byte {
 	tb.Helper()
-	data, err := os.ReadFile(filepath.Join(s.config.Model, "fixtures/000_source.png"))
+	return nativeFixture(tb, s, "000_source.png")
+}
+
+func nativeFixture(tb testing.TB, s *Service, name string) []byte {
+	tb.Helper()
+	root, err := os.OpenRoot(filepath.Join(s.config.Model, "fixtures"))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	defer func() {
+		if closeErr := root.Close(); closeErr != nil {
+			tb.Error(closeErr)
+		}
+	}()
+	data, err := root.ReadFile(name)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -107,7 +128,7 @@ func TestNativeFixtures(t *testing.T) {
 		t.Fatalf("fixture comparison: %+v: %v", results, err)
 	}
 	for _, result := range results {
-		if !result.Passed || result.TensorMaxError != 0 {
+		if !result.Passed || result.TensorMaxError > tensorTolerance {
 			t.Errorf("fixture mismatch: %+v", result)
 		}
 	}
@@ -122,7 +143,7 @@ func TestNativeCacheIsolationAndFileURLPrecedence(t *testing.T) {
 	}
 	// Hold every native tensor: a cache hit must complete without running inference.
 	var held []*tensorSlot
-	for range s.config.Concurrency {
+	for range s.plan.concurrency {
 		held = append(held, <-s.engine.slots)
 	}
 	defer func() {
@@ -144,9 +165,9 @@ func TestNativeCacheIsolationAndFileURLPrecedence(t *testing.T) {
 func TestNativeConcurrentAndCancellation(t *testing.T) {
 	s := nativeService(t)
 	data := nativeImage(t, s)
-	errorsChannel := make(chan error, s.config.MaxRequests)
+	errorsChannel := make(chan error, s.plan.requests)
 	group := xutil.WaitGroup("image_filter_concurrent_test")
-	for range s.config.MaxRequests {
+	for range s.plan.requests {
 		group.Go(t.Context(), func(ctx context.Context) {
 			_, err := s.Check(ctx, Source{Reader: bytes.NewReader(data)})
 			errorsChannel <- err

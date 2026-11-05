@@ -7,20 +7,25 @@ import (
 	"github.com/caitun/inferkit/api/handler"
 	"github.com/caitun/inferkit/db"
 	"github.com/caitun/inferkit/services/imagefilter"
+	"github.com/caitun/inferkit/services/ocr"
 )
 
 // InitRoute performs the init route operation.
-func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool) {
+func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service) {
 	InitMiddleware()
 	r.Use(AttemptAuth())
+	r.Use(PageNavigation(filter != nil, recognizer != nil, records != nil && imageReviewAuth != nil))
 
 	initPackageHandler(r)
 	if filter != nil {
 		r.GET("/image-filter", handler.ImageFilterPage(filter))
 	}
+	if recognizer != nil {
+		r.GET("/ocr", handler.OCRPage(recognizer))
+	}
 	initConfigCenterHandler(r)
 	initImageReviewHandler(r, records)
-	initAPIHandler(r, filter, records, collect)
+	initAPIHandler(r, filter, records, collect, recognizer)
 }
 
 func initImageReviewHandler(r *base.Router, records *db.ImageStore) {
@@ -56,7 +61,7 @@ func initConfigCenterHandler(r *base.Router) {
 	handler.ConfigCenterRuntimeControl(configCenterRuntime)
 }
 
-func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool) {
+func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service) {
 	api := r.Group("/api", apiAuthorized)
 	api.GET("/", handler.APIHomePage)
 	if filter != nil {
@@ -65,6 +70,10 @@ func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.Ima
 			recorder = records
 		}
 		api.POST("/image/filter", handler.FilterImage(filter, recorder))
+	}
+
+	if recognizer != nil {
+		api.POST("/image/ocr", handler.RecognizeImage(recognizer))
 	}
 
 	// Add CRUD services for db.User

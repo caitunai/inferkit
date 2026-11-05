@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
 
+ARG WITH_VIPS=true
+
 FROM node:24-trixie-slim AS ui
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64
@@ -20,25 +22,41 @@ COPY scripts/prepare-onnxruntime-linux.sh /tmp/prepare-onnxruntime-linux.sh
 RUN bash /tmp/prepare-onnxruntime-linux.sh /opt/onnxruntime
 
 FROM golang:1.27-trixie AS build
+ARG WITH_VIPS
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64
+RUN case "$WITH_VIPS" in \
+      true) apt-get update && apt-get install -y --no-install-recommends \
+        cmake meson ninja-build nasm pkg-config curl ca-certificates \
+        libglib2.0-dev libexpat1-dev libjpeg62-turbo-dev libpng-dev libwebp-dev \
+        libexif-dev liblcms2-dev zlib1g-dev && rm -rf /var/lib/apt/lists/* ;; \
+      false) ;; \
+      *) exit 1 ;; \
+    esac
 WORKDIR /src
-ENV CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1
+ENV CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 GOEXPERIMENT=simd
+ENV PKG_CONFIG_PATH=/opt/inferkit-image/lib/pkgconfig LD_LIBRARY_PATH=/opt/inferkit-image/lib
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=ui /src/storage/ui/dist/ ./storage/ui/dist/
 COPY --from=onnxruntime /opt/onnxruntime/include/ /opt/onnxruntime/include/
-RUN bash scripts/check-onnxruntime-api.sh /opt/onnxruntime \
-    && go test ./... \
-    && go build -trimpath -o /out/inferkit . \
+RUN if [ "$WITH_VIPS" = true ]; then bash scripts/prepare-image-linux.sh /opt/inferkit-image; else mkdir /opt/inferkit-image; fi
+RUN image_tags=""; if [ "$WITH_VIPS" = true ]; then image_tags=vips; fi; \
+    bash scripts/check-onnxruntime-api.sh /opt/onnxruntime \
+    && go test -tags "$image_tags" ./... \
+    && go build -tags "$image_tags" -trimpath -o /out/inferkit . \
     && go test -c -o /out/onnxruntime.test github.com/yalue/onnxruntime_go
 
 FROM debian:trixie-slim AS runtime-base
+ARG WITH_VIPS
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64 \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl libstdc++6 libgcc-s1 locales passwd \
+    && if [ "$WITH_VIPS" = true ]; then apt-get install -y --no-install-recommends \
+         libglib2.0-0t64 libexpat1 libjpeg62-turbo libpng16-16t64 libwebp7 \
+         libwebpmux3 libwebpdemux2 libexif12 liblcms2-2 zlib1g; fi \
     && localedef -i en_US -f UTF-8 en_US.UTF-8 \
     && groupadd --gid 10001 inferkit \
     && useradd --uid 10001 --gid 10001 --home-dir /var/lib/inferkit --no-create-home --shell /usr/sbin/nologin inferkit \
@@ -48,7 +66,9 @@ RUN test "$TARGETARCH" = amd64 \
 COPY --from=onnxruntime /opt/onnxruntime/lib/ /opt/onnxruntime/lib/
 COPY --from=onnxruntime /opt/onnxruntime/LICENSE /opt/onnxruntime/ThirdPartyNotices.txt /usr/share/doc/onnxruntime/
 COPY --from=build --chmod=0555 /out/inferkit /usr/local/bin/inferkit
-ENV LANG=en_US.UTF-8 PORT=8080 LD_LIBRARY_PATH=/opt/onnxruntime/lib
+COPY --from=build /opt/inferkit-image/ /opt/inferkit-image/
+COPY deploy/licenses/png-LICENSE.txt deploy/licenses/libvips-LICENSE.txt /usr/share/doc/inferkit/
+ENV LANG=en_US.UTF-8 PORT=8080 LD_LIBRARY_PATH=/opt/onnxruntime/lib:/opt/inferkit-image/lib
 WORKDIR /var/lib/inferkit
 USER 10001:10001
 EXPOSE 8080

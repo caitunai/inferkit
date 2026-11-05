@@ -135,17 +135,20 @@ activeKey="config-key-v1"
 keyring="/absolute/path/to/config-center-keys.json"
 
 [image.filter]
+# cpu 保持现有结果；auto 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。
+provider="cpu"
+coremlComputeUnits="ALL"
+# CPU threads, inference concurrency and request admission are automatic.
 model="/path/to/artwork_fp32"
 # Defaults to true when db.database is configured. Apply Atlas migrations first.
 recordResults=true
 # Optional native CPU library path. macOS Homebrew is detected automatically.
 library=""
-concurrency=2
-threads=1
-maxRequests=8
 timeout="30s"
 maxBytes=10485760
 maxPixels=20000000
+# Set true temporarily for performance comparisons; also disables in-flight coalescing.
+bypassCache=false
 cacheEntries=1024
 cacheTTL="5m"
 
@@ -154,3 +157,33 @@ cacheTTL="5m"
 enabled=false
 username="image-review-admin"
 password="replace-with-at-least-16-random-characters"
+
+[image.ocr]
+# cpu 保持现有结果；auto 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。
+provider="cpu"
+coremlComputeUnits="ALL"
+# Existing `serve` command exposes POST /api/image/ocr when enabled.
+enabled=false
+# Defaults to PP-OCRv6 medium. Paths and paired dictionary are deployment settings.
+detectionModel="models/pp-ocrv6-medium/det.onnx"
+recognitionModel="models/pp-ocrv6-medium/rec.onnx"
+dictionary="models/pp-ocrv6-medium/dict.txt"
+# Optional SHA-256 pins for the exact deployed files.
+detectionSHA256=""
+recognitionSHA256=""
+dictionarySHA256=""
+# Must resolve to the same native library as image.filter.library when both run.
+library=""
+# CPU threads, inference concurrency and request admission are automatic.
+timeout="60s"
+maxBytes=10485760
+maxPixels=20000000
+detectionMaxSide=960
+recognitionHeight=48
+recognitionMaxWidth=2048
+maxCandidates=1000
+maxLines=1000
+detectionThreshold=0.2
+boxThreshold=0.45
+unclipRatio=1.4
+minConfidence=0.5

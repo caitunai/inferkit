@@ -1,0 +1,11 @@
+.ik-navigation { color: #506157; background: #fff; border-bottom: 1px solid #e5e9e5; font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+.ik-navigation-inner { display: flex; align-items: center; gap: 32px; width: min(1320px, calc(100% - 64px)); min-height: 58px; margin-inline: auto; }
+.ik-navigation-brand { display: inline-flex; align-items: center; gap: 9px; color: #283f31; font-size: 15px; font-weight: 700; text-decoration: none; flex-shrink: 0; }
+.ik-navigation-brand > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: #294937; color: white; font-size: 17px; font-family: ui-serif, Georgia, serif; }
+.ik-navigation-links { align-self: stretch; display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: thin; }
+.ik-navigation-links a { padding: 9px 13px; color: #7c8982; border-radius: 7px; font-size: 12px; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.ik-navigation-links a:hover { color: #294937; background: #f6f8f5; }
+.ik-navigation-links a[aria-current="page"] { color: #294937; background: #edf3ed; font-weight: 650; }
+.ik-navigation a:focus-visible { outline: 3px solid #b8c7fa; outline-offset: 2px; }
+.ik-navigation-caption { color: #a3ada6; font-size: 10px; margin-left: auto; white-space: nowrap; }
+@media (max-width: 640px) { .ik-navigation-inner { width: calc(100% - 32px); gap: 14px; flex-wrap: wrap; padding-block: 12px; }.ik-navigation-brand { font-size: 14px; }.ik-navigation-links { flex: 1; gap: 2px; }.ik-navigation-links a { padding: 8px; font-size: 11px; }.ik-navigation-caption { display: none; } }

@@ -1,4 +1,4 @@
-package imagefilter
+package imageinput
 
 import (
 	"bytes"
@@ -48,11 +48,11 @@ func (i orientedImage) At(x, y int) color.Color {
 func exifOrientation(data []byte, format string) uint16 {
 	var exif []byte
 	switch format {
-	case "jpeg":
+	case formatJPEG:
 		exif = jpegEXIF(data)
-	case "png":
+	case formatPNG:
 		exif = chunkEXIF(data, 8, binary.BigEndian, false)
-	case "webp":
+	case formatWebP:
 		exif = chunkEXIF(data, 12, binary.LittleEndian, true)
 	}
 	exif = bytes.TrimPrefix(exif, []byte("Exif\x00\x00"))

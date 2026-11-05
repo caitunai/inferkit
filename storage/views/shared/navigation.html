@@ -1,0 +1,11 @@
+{{ if .navigation }}
+<nav class="ik-navigation" aria-label="功能导航">
+  <div class="ik-navigation-inner">
+    <a class="ik-navigation-brand" href="{{ (index .navigation 0).Path }}" aria-label="InferKit 功能首页"><span aria-hidden="true">i</span>InferKit</a>
+    <div class="ik-navigation-links">
+      {{ range .navigation }}<a href="{{ .Path }}" {{ if .Active }}aria-current="page"{{ end }}>{{ .Label }}</a>{{ end }}
+    </div>
+    <span class="ik-navigation-caption">图像工具箱</span>
+  </div>
+</nav>
+{{ end }}

@@ -19,7 +19,7 @@ type cachedResult struct {
 
 // The FIFO ring retains at most CacheEntries small records, never bytes or URLs.
 // TTL is absolute; access removes expired entries, and insertion evicts one old
-// slot in O(1). MaxRequests bounds the separate map of in-flight keys.
+// slot in O(1). Automatic request admission bounds the map of in-flight keys.
 type resultStore struct {
 	items   map[string]*cachedResult
 	pending map[string]*pendingCall

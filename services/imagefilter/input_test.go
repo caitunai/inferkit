@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/caitun/inferkit/services/imageinput"
 	"github.com/spf13/viper"
 )
 
@@ -16,12 +17,12 @@ const testImageBody = "abc"
 func TestURLSyntax(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"file:///etc/passwd", "https://user:secret@example.com/image", "https://example.com/#fragment", "/local/path"} {
-		if err := validateURL(raw); !errors.Is(err, ErrURL) {
+		if err := imageinput.ValidateURL(raw); !errors.Is(err, ErrURL) {
 			t.Errorf("accepted %q: %v", raw, err)
 		}
 	}
 	for _, raw := range []string{"http://127.0.0.1/image.png", "http://10.1.2.3/a", "https://198.18.0.69/a", "https://example.com/image.png"} {
-		if err := validateURL(raw); err != nil {
+		if err := imageinput.ValidateURL(raw); err != nil {
 			t.Errorf("valid HTTP(S) URL rejected: %s %v", raw, err)
 		}
 	}
@@ -45,7 +46,7 @@ func TestDownloadResponseLimits(t *testing.T) {
 	t.Cleanup(server.Close)
 	c := Configuration(viper.New())
 	c.MaxBytes = 3
-	service := &Service{config: c, http: newDownloader(c)}
+	service := &Service{config: c, http: newDownloader(c, executionPlan{concurrency: 1, requests: 2})}
 	t.Cleanup(service.http.GetClient().CloseIdleConnections)
 	data, err := service.readSource(t.Context(), Source{URL: server.URL + "/ok"})
 	if err != nil || string(data) != testImageBody {
@@ -74,7 +75,7 @@ func TestSourceReaderTakesPrecedence(t *testing.T) {
 	if err != nil || string(data) != testImageBody {
 		t.Fatalf("uploaded file must win: %q %v", data, err)
 	}
-	if _, err = readLimited(bytes.NewBufferString("abcd"), 3, ErrInput); !errors.Is(err, ErrTooLarge) {
+	if _, err = imageinput.ReadLimited(bytes.NewBufferString("abcd"), 3, ErrInput); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("size limit: %v", err)
 	}
 }
@@ -87,9 +88,9 @@ func TestConfigurationRejectsInvalidLimits(t *testing.T) {
 	if err := c.validate(); err != nil {
 		t.Fatal(err)
 	}
-	c.Concurrency = 0
+	c.CacheEntries = -1
 	if err := c.validate(); !errors.Is(err, ErrConfig) {
-		t.Fatalf("concurrency: %v", err)
+		t.Fatalf("cache entries: %v", err)
 	}
 	v.Set("image.filter.maxBytes", 0)
 	if err := Configuration(v).validate(); !errors.Is(err, ErrConfig) {

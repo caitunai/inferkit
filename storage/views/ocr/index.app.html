@@ -1,0 +1,77 @@
+{{ define "content" }}
+<main class="ocr-app min-h-screen" x-data="ocrApp()" data-max-bytes="{{ .max_bytes }}" data-timeout-ms="{{ .timeout_ms }}" @paste.window="onPaste($event)" @pagehide.window="cancel()" x-cloak>
+  <header class="app-header">
+    <div class="page-width header-content">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M8 4H5v4m11-4h3v4M5 16v4h3m11-4v4h-3M8 9h8m-4 0v7m-2 0h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <div><span class="brand-name">OCR 识别</span><p class="brand-subtitle">IMAGE TO TEXT</p></div>
+      </div>
+      <div class="header-actions"><span class="service-state"><span></span> 服务已就绪</span><button type="button" class="button button-secondary access-trigger" @click="accessOpen = !accessOpen" :aria-expanded="accessOpen" aria-controls="ocr-access">访问设置<span class="credential-dot" :class="token.trim() && 'ready'" :aria-label="token.trim() ? '凭证已填写' : '需要填写凭证'"></span></button></div>
+    </div>
+  </header>
+  <div class="page-width page-content">
+    <section id="ocr-access" class="access-panel" x-show="accessOpen" x-transition.opacity>
+      <div><h2>API 访问凭证</h2><p>与图片检测共用，此浏览器默认保留一年。</p><p class="credential-expiry" x-text="tokenExpiryLabel"></p><p class="credential-warning" role="status" x-show="credentialNotice" x-text="credentialNotice"></p></div>
+      <form class="credential-field" @submit.prevent="rememberToken()"><label class="sr-only" for="ocr-token">API Token</label><input id="ocr-token" type="password" x-model="token" @input="tokenExpiresAt = 0" placeholder="粘贴 API Token" autocomplete="off" spellcheck="false" :disabled="busy"><button type="button" class="button button-ghost" @click="forgetToken()" :disabled="busy || !token.trim()">清除</button><button type="submit" class="button button-primary" :disabled="busy || !token.trim()">保存</button></form>
+    </section>
+    <div class="page-heading"><div><p class="eyebrow">文字识别工作台</p><h1>提取图片中的文字</h1><p class="page-description">粘贴、上传图片或输入图片链接，识别文字并查看对应位置。</p></div><span class="session-badge"><span></span> 历史仅在本次页面中保留</span></div>
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2 ocr-workbench">
+      <section class="surface" aria-labelledby="ocr-input-heading">
+        <div class="panel-heading"><div class="heading-with-step"><span class="step">01</span><h2 id="ocr-input-heading">添加图片</h2></div><span class="muted small">JPEG · WebP · PNG · AVIF</span></div>
+        <div class="input-content">
+          <div class="mode-tabs" role="group" aria-label="图片来源"><button type="button" :aria-pressed="mode === 'file'" :class="mode === 'file' && 'selected'" @click="selectMode('file')">粘贴 / 上传图片</button><button type="button" :aria-pressed="mode === 'url'" :class="mode === 'url' && 'selected'" @click="selectMode('url')">图片链接</button></div>
+          <form @submit.prevent="recognize()">
+            <div x-show="mode === 'file'">
+              <input class="sr-only" x-ref="fileInput" type="file" accept="image/jpeg,image/webp,image/png,image/avif,.jpg,.jpeg,.webp,.png,.avif" @change="onFileInput($event)" aria-label="选择 OCR 图片文件">
+              <div class="dropzone" :class="dragging && 'dragging'" @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop($event)">
+                <div class="dropzone-empty" x-show="!preview">
+                  <span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="5" y="5" width="22" height="22" rx="5" stroke="currentColor" stroke-width="1.5"/><path d="m7 24 7-8 5 5 4-5 4 6" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg></span>
+                  <h3>粘贴一张图片，开始识别</h3><p>支持直接粘贴、拖入图片或选择文件</p><button type="button" class="button button-secondary" @click="$refs.fileInput.click()">选择图片 ↗</button><span class="paste-shortcut"><kbd>Ctrl</kbd> / <kbd>⌘</kbd> + <kbd>V</kbd> 粘贴图片</span>
+                </div>
+                <div class="selected-image" x-show="preview"><img x-show="!inputPreviewFailed" :src="preview || undefined" @error="inputPreviewFailed = true" alt="待识别的图片"><p class="ocr-preview-fallback" x-show="inputPreviewFailed">浏览器无法预览此图片，仍可提交识别。</p><button type="button" class="remove-image" @click="clearFile()" :disabled="busy" aria-label="移除当前图片">×</button></div>
+              </div>
+              <div class="input-meta"><span class="truncate" x-text="fileName || '尚未选择图片'"></span><span x-text="fileSize || `最大 ${maxSizeLabel}`"></span></div>
+            </div>
+            <div class="url-panel" x-show="mode === 'url'"><span class="url-symbol" aria-hidden="true">↗</span><h3>通过图片链接识别</h3><p>输入可直接访问的图片地址</p><label for="ocr-url">图片 URL</label><input id="ocr-url" type="url" x-model="url" @input="onURLInput($event.target.value, $event.isComposing)" @compositionend="onURLInput($event.target.value)" :disabled="mode !== 'url'" placeholder="https://example.com/image.png" autocomplete="off" spellcheck="false" :required="mode === 'url'"><p class="url-help">支持 HTTP / HTTPS 链接，也可以直接上传图片文件。</p></div>
+            <div class="form-footer"><span class="muted small">添加图片后自动识别</span><div class="submit-actions"><button x-show="busy" type="button" class="button button-secondary" @click="cancel()">取消</button><button type="submit" class="button button-primary detect-button" :disabled="!canSubmit"><span x-show="busy" class="spinner" aria-hidden="true"></span><span x-text="busy ? '正在识别…' : '重新识别'"></span></button></div></div>
+          </form>
+        </div>
+      </section>
+      <section class="surface ocr-result" aria-labelledby="ocr-result-heading" :aria-busy="busy">
+        <div class="panel-heading"><div class="heading-with-step"><span class="step">02</span><h2 id="ocr-result-heading">识别结果</h2></div><button type="button" class="button button-secondary ocr-copy" @click="copyText()" :disabled="busy || !result?.text">复制全文</button></div>
+        <div class="ocr-processing" role="status" x-show="busy"><span class="spinner" aria-hidden="true"></span>正在识别图片，请稍候…</div>
+        <div class="result-empty ocr-empty" x-show="!active && !busy"><span class="ocr-empty-mark" aria-hidden="true">文</span><h3>等待一张图片</h3><p>识别完成后，可在这里查看、选择和复制文字。<br>点击文字区域，可查看它在图片中的位置。</p></div>
+        <template x-if="active">
+          <div class="ocr-result-body">
+            <div class="ocr-result-meta"><span class="truncate" :title="active.name" x-text="active.name"></span><span x-text="durationLabel(active.duration)"></span></div>
+            <div class="classification is-error" role="alert" x-show="active.error"><div><h3>识别未完成</h3><p x-text="active.error"></p></div></div>
+            <template x-if="result">
+              <div>
+                <div class="ocr-result-tabs" role="group" aria-label="结果显示方式"><button type="button" :aria-pressed="resultMode === 'text'" :class="resultMode === 'text' && 'selected'" @click="resultMode = 'text'">全文</button><button type="button" :aria-pressed="resultMode === 'lines'" :class="resultMode === 'lines' && 'selected'" @click="resultMode = 'lines'">逐行结果 <span x-text="result.lines.length"></span></button><span class="ocr-dimensions" x-text="`${result.width} × ${result.height}`"></span></div>
+                <textarea class="ocr-text" x-show="resultMode === 'text'" :value="result.text" readonly aria-label="OCR 识别全文" placeholder="未识别到文字，可以换一张更清晰的图片试试。" spellcheck="false"></textarea>
+                <div class="ocr-lines" x-show="resultMode === 'lines'" role="list" aria-label="逐行识别结果"><p class="ocr-no-text" x-show="!result.lines.length">未识别到文字。</p><template x-for="(line, index) in result.lines" :key="index"><div role="listitem"><button type="button" class="ocr-line" :class="selectedLine === index && 'selected'" :aria-pressed="selectedLine === index" @click="selectedLine = index"><span class="ocr-line-index" x-text="String(index + 1).padStart(2, '0')"></span><span class="ocr-line-text" x-text="line.text"></span><span class="ocr-line-confidence" x-text="percent(line.confidence)"></span></button></div></template></div>
+                <div class="ocr-image-heading"><span>图片与文字位置</span><label><input type="checkbox" x-model="showBoxes"> 显示文本框</label></div>
+                <div class="ocr-result-preview">
+                  <img x-show="activePreview" :src="activePreview || undefined" :alt="active.name" referrerpolicy="no-referrer" @error="previewErrors[active.id] = true">
+                  <div class="ocr-box-layer" x-show="activePreview && showBoxes" role="img" aria-label="识别到的文字区域"><template x-for="(line, index) in result.lines" :key="index"><svg class="ocr-boxes" :viewBox="`0 0 ${result.width} ${result.height}`" preserveAspectRatio="xMidYMid meet" aria-hidden="true"><polygon :points="points(line.box)" :class="selectedLine === index && 'selected'" @click="selectedLine = index; resultMode = 'lines'"><title x-text="line.text"></title></polygon></svg></template></div>
+                  <p class="ocr-preview-fallback" x-show="!activePreview">图片预览暂不可用，识别文字仍可查看。</p>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </section>
+    </div>
+    <div class="feedback feedback-error" role="alert" x-show="error"><p x-text="error"></p><button type="button" @click="error = ''" aria-label="关闭错误提示">×</button></div>
+    <div class="feedback feedback-notice" role="status" x-show="notice"><p x-text="notice"></p><button type="button" @click="notice = ''" aria-label="关闭提示">×</button></div>
+    <section class="surface history-panel" aria-labelledby="ocr-history-heading">
+      <div class="history-heading"><div><div class="history-title"><h2 id="ocr-history-heading">本次 OCR 历史</h2><span class="count-badge" x-text="history.length">0</span></div><p>仅在当前页面临时保留，刷新或关闭后清空。最多 20 条。</p></div><button type="button" class="button button-ghost" @click="clearHistory()" :disabled="busy || !history.length">清空历史</button></div>
+      <div class="history-grid grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" x-show="history.length" role="list" aria-label="OCR 历史记录"><template x-for="entry in history" :key="entry.id"><div role="listitem" class="min-w-0"><button type="button" class="history-card" :class="activeID === entry.id && 'active'" :aria-pressed="activeID === entry.id" @click="showEntry(entry.id)" :disabled="busy"><span class="history-card-image ocr-history-image"><img x-show="historyImage(entry)" :src="historyImage(entry) || undefined" :alt="entry.name" referrerpolicy="no-referrer" loading="lazy" @error="previewErrors[entry.id] = true"><span class="history-no-image" x-show="!historyImage(entry)">暂无图片预览</span><span class="result-badge" :class="entry.error ? 'failed' : 'valid'" x-text="entry.error ? '识别未完成' : `${entry.result.lines.length} 个文字区域`"></span><span class="history-selected" x-show="activeID === entry.id" aria-hidden="true">✓</span></span><span class="history-card-body"><strong class="history-name truncate" x-text="entry.name" :title="entry.name"></strong><span class="ocr-history-excerpt" x-text="entry.error || entry.result.text || '未识别到文字'"></span><span class="history-card-meta"><span x-text="sourceLabel(entry.kind)"></span><time :datetime="new Date(entry.time).toISOString()" x-text="timeLabel(entry.time)"></time></span></span></button></div></template></div>
+      <div class="history-empty" x-show="!history.length"><span aria-hidden="true">◷</span><div><h3>还没有识别记录</h3><p>识别后的图片与文字会显示在这里，方便随时回看。</p></div></div>
+      <div class="history-footer"><span><span class="session-dot"></span>图片和识别历史不会保存到浏览器存储</span><span>粘贴 · 识别 · 回看</span></div>
+    </section>
+    <footer class="page-footer"><span>INFERKIT <span>文字识别工具</span></span><span>一张图片，一段文字。</span></footer>
+  </div>
+</main>
+<noscript><p style="padding:2rem">请启用 JavaScript 以使用 OCR 测试页面。</p></noscript>
+{{ end }}
