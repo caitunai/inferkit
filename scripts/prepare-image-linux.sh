@@ -4,7 +4,8 @@ set -euo pipefail
 fail() { printf '%s\n' "$*" >&2; exit 1; }
 [[ $# -ge 1 && $# -le 2 ]] || fail "Usage: $0 OUTPUT_DIRECTORY [VERIFIED_SOURCE_ARCHIVES_DIRECTORY]"
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || fail 'Build native image libraries on Linux x86_64 for the Debian 13 image'
-for executable in cc c++ cmake meson ninja nasm pkg-config curl sha256sum tar dpkg-query getconf; do
+# tar needs these external decompressors for the pinned .tar.xz/.tar.gz sources.
+for executable in xz gzip cc c++ cmake meson ninja nasm pkg-config curl sha256sum tar dpkg-query getconf; do
   command -v "$executable" >/dev/null || fail "Missing command: $executable"
 done
 [[ "$(dpkg-query -W -f='${db:Status-Abbrev}' libjpeg62-turbo-dev 2>/dev/null)" == ii* ]] \

@@ -27,7 +27,7 @@ ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64
 RUN case "$WITH_VIPS" in \
       true) apt-get update && apt-get install -y --no-install-recommends \
-        cmake meson ninja-build nasm pkg-config curl ca-certificates \
+        cmake meson ninja-build nasm pkg-config curl ca-certificates xz-utils \
         libglib2.0-dev libexpat1-dev libjpeg62-turbo-dev libpng-dev libwebp-dev \
         libexif-dev liblcms2-dev zlib1g-dev && rm -rf /var/lib/apt/lists/* ;; \
       false) ;; \

@@ -91,7 +91,7 @@ bypassCache=true # 性能对照时使用。
 ```bash
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends \
-  build-essential ca-certificates curl git binutils cmake meson ninja-build nasm pkg-config \
+  build-essential ca-certificates curl git binutils cmake meson ninja-build nasm pkg-config xz-utils \
   libglib2.0-dev libexpat1-dev libjpeg62-turbo-dev libpng-dev libwebp-dev \
   libexif-dev liblcms2-dev zlib1g-dev
 ```
