@@ -10,12 +10,12 @@ import (
 )
 
 func TestNativeCoreMLRecognition(t *testing.T) {
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" || os.Getenv("OCR_TEST_COREML") != "1" {
+	if !coreMLTestHost() || os.Getenv("OCR_TEST_COREML") != "1" {
 		t.Skip("set OCR_TEST_COREML=1 on macOS ARM to exercise CoreML OCR")
 	}
 	c, dir := nativeConfiguration(t)
 	cpu := newNativeService(t, c)
-	c.Provider = "coreml"
+	c.Provider = coreMLProvider
 	accelerated := newNativeService(t, c)
 	data := nativeRead(t, dir, "sample.png")
 	want, err := cpu.Recognize(t.Context(), imageinput.Source{Reader: bytes.NewReader(data)})
@@ -31,3 +31,5 @@ func TestNativeCoreMLRecognition(t *testing.T) {
 	}
 	t.Logf("CoreML preserved text in %d lines", len(got.Lines))
 }
+
+func coreMLTestHost() bool { return runtime.GOOS == "darwin" && runtime.GOARCH == "arm64" }

@@ -3,59 +3,87 @@ package ocr
 import (
 	"context"
 	"errors"
+	"slices"
+	"time"
 
-	ort "github.com/yalue/onnxruntime_go"
-
+	"github.com/caitun/inferkit/services/imagetiming"
 	"github.com/caitun/inferkit/services/onnx"
+	ort "github.com/yalue/onnxruntime_go"
 )
 
 const maxOutputElements = 32_000_000
 
-func createSession(data []byte, threads int, input, output string, backend onnx.Backend) (*ort.DynamicAdvancedSession, string, error) {
-	session, provider, err := backend.Create(data, []string{input}, []string{output}, func(options *ort.SessionOptions) error { return onnx.Configure(options, threads) })
-	if err != nil {
-		return nil, "", errors.Join(ErrModel, err)
-	}
-	return session, provider, nil
-}
-
-// run lets ONNX allocate dynamic outputs rather than guessing dimensions or
-// probing error messages. The binding already copies native output to a Go-owned
-// buffer; retaining that slice after Destroy avoids copying the whole tensor again.
+// run returns owned data for callers that retain it across runs.
 func (m *model) run(ctx context.Context, data []float32, shape ort.Shape) (values []float32, dims ort.Shape, returnErr error) {
-	if !shapeMatches(m.input, shape) {
+	if len(data) != int(shape.FlattenedSize()) {
 		return nil, nil, ErrModel
 	}
-	input, err := ort.NewTensor(shape, data)
-	if err != nil {
-		return nil, nil, errors.Join(ErrInference, err)
+	err := m.withTensor(ctx, shape, func(dst []float32) error { copy(dst, data); return nil }, func(output []float32, outputShape ort.Shape) error {
+		values, dims = slices.Clone(output), slices.Clone(outputShape)
+		return nil
+	})
+	return values, dims, err
+}
+
+// withTensor holds exclusive ownership through postprocessing. Idle buffers are cleared.
+func (m *model) withTensor(ctx context.Context, shape ort.Shape, prepare func([]float32) error, consume func([]float32, ort.Shape) error) (returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrInference, err)
 	}
-	defer func() { returnErr = errors.Join(returnErr, input.Destroy()) }()
-	options, err := ort.NewRunOptions()
-	if err != nil {
-		return nil, nil, errors.Join(ErrInference, err)
+	if !shapeMatches(m.input, shape) {
+		return ErrModel
 	}
-	defer func() { returnErr = errors.Join(returnErr, options.Destroy()) }()
-	outputs := make([]ort.Value, 1)
-	defer func() {
-		if outputs[0] != nil {
-			returnErr = errors.Join(returnErr, outputs[0].Destroy())
+	slot, reused, err := m.pool.acquire(shape)
+	if err != nil {
+		return err
+	}
+	recordBuffer(ctx, reused)
+	defer func() { returnErr = errors.Join(returnErr, m.pool.release(slot, returnErr != nil)) }()
+	if err = prepare(slot.input.GetData()); err != nil {
+		return err
+	}
+	stage := imagetiming.DetectionInference
+	if len(m.output) == 3 {
+		stage = imagetiming.RecognitionInference
+	}
+	done := imagetiming.Measure(ctx, stage)
+	start := time.Now()
+	err = m.runSlot(ctx, slot)
+	done(err)
+	if len(m.output) == 3 {
+		recordRun(ctx, shape, time.Since(start))
+	}
+	if err != nil {
+		return err
+	}
+	return consume(slot.output.GetData(), slot.shape)
+}
+
+func (m *model) runSlot(ctx context.Context, slot *tensorSlot) error {
+	hadOutput := slot.output != nil
+	err := onnx.Run(ctx, m.session, slot.inputs, slot.outputs, slot.options)
+	if err != nil && hadOutput && ctx.Err() == nil {
+		// Compatible custom models may have data-dependent output dimensions.
+		// Retry once with shape discovery, without parsing native error strings.
+		if closeErr := slot.output.Destroy(); closeErr != nil {
+			return errors.Join(ErrInference, err, closeErr)
 		}
-	}()
-	if err = onnx.Run(ctx, m.session, []ort.Value{input}, outputs, options); err != nil {
-		return nil, nil, errors.Join(ErrInference, err)
+		slot.output, slot.outputs[0] = nil, nil
+		err = onnx.Run(ctx, m.session, slot.inputs, slot.outputs, slot.options)
 	}
-	result, ok := outputs[0].(*ort.Tensor[float32])
+	if err != nil {
+		return errors.Join(ErrInference, err)
+	}
+	output, ok := slot.outputs[0].(*ort.Tensor[float32])
 	if !ok {
-		return nil, nil, ErrInference
+		return ErrInference
 	}
-	// Bound the output consumed by postprocessing. onnxruntime_go v1.38
-	// owns the returned Go slice; Destroy releases the C handle, not its buffer.
-	if len(result.GetData()) > maxOutputElements {
-		return nil, nil, ErrInference
+	slot.output = output
+	if len(output.GetData()) > maxOutputElements {
+		return ErrInference
 	}
-	values = result.GetData()
-	return values, result.GetShape(), nil
+	slot.shape = output.GetShape()
+	return nil
 }
 
 func shapeMatches(expected, actual ort.Shape) bool {
@@ -63,7 +91,7 @@ func shapeMatches(expected, actual ort.Shape) bool {
 		return false
 	}
 	for i, want := range expected {
-		if want > 0 && want != actual[i] {
+		if actual[i] < 1 || want > 0 && want != actual[i] {
 			return false
 		}
 	}

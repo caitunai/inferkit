@@ -216,7 +216,14 @@ func TestNativeRunOutputOwnership(t *testing.T) {
 func TestNativeAutomaticExecutionParity(t *testing.T) {
 	config, dir := nativeConfiguration(t)
 	data := nativeRead(t, dir, "sample.png")
-	single := newNativeServiceWithPlan(t, config, legacyPlan(4))
+	// Isolate scheduling/batching from intra-op rounding. The original small
+	// model already differs by 1.57e-5 between 4-thread and 1-thread recognition.
+	// Keep the existing 1e-5 bound against a serial baseline with identical ops.
+	plan := automaticPlan(config, resource.Detect())
+	plan.lineWorkers = 1
+	singleConfig := config
+	singleConfig.RecognitionBatchSize = 1
+	single := newNativeServiceWithPlan(t, singleConfig, plan)
 	want, err := single.Recognize(t.Context(), imageinput.Source{Reader: bytes.NewReader(data)})
 	if err != nil {
 		t.Fatal(err)
@@ -234,11 +241,21 @@ func TestNativeAutomaticExecutionParity(t *testing.T) {
 
 func assertResultParity(t *testing.T, got, want Result) {
 	t.Helper()
+	assertResultLayout(t, got, want)
+	for i, line := range got.Lines {
+		if math.Abs(line.Confidence-want.Lines[i].Confidence) > 1e-5 {
+			t.Fatalf("execution changed line %d confidence: %g vs %g", i, line.Confidence, want.Lines[i].Confidence)
+		}
+	}
+}
+
+func assertResultLayout(t *testing.T, got, want Result) {
+	t.Helper()
 	if got.Text != want.Text || got.Width != want.Width || got.Height != want.Height || len(got.Lines) != len(want.Lines) {
 		t.Fatal("thread setting changed recognized text, dimensions or line count")
 	}
 	for i, line := range got.Lines {
-		if line.Text != want.Lines[i].Text || line.Box != want.Lines[i].Box || math.Abs(line.Confidence-want.Lines[i].Confidence) > 1e-5 {
+		if line.Text != want.Lines[i].Text || line.Box != want.Lines[i].Box {
 			t.Fatalf("thread setting changed line %d: %+v vs %+v", i, line, want.Lines[i])
 		}
 	}

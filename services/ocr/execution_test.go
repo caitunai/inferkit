@@ -16,7 +16,7 @@ func TestAutomaticResourceBudget(t *testing.T) {
 	t.Parallel()
 	config := Configuration(viper.New())
 	large := automaticPlan(config, resource.Budget{CPUs: 32, Memory: 64 << 30})
-	if large.cpus != 32 || large.detectionThreads != 32 || large.recognitionThreads != 1 || large.lineWorkers != 32 {
+	if large.cpus != 32 || large.detectionThreads != 32 || large.recognitionThreads != 1 || large.lineWorkers < 2 || large.lineWorkers > 32 {
 		t.Fatalf("CPU budget remains fixed: %+v", large)
 	}
 	if large.images <= 1 || large.requests <= 4 {

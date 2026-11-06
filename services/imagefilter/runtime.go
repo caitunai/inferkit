@@ -11,13 +11,13 @@ import (
 )
 
 type engine struct {
-	provider    string
-	lease       *onnx.Lease
-	compilation *onnx.CompilationCache
-	session     *ort.DynamicAdvancedSession
-	slots       chan *tensorSlot
-	all         []*tensorSlot
-	runs        atomic.Uint64
+	provider string
+	lease    *onnx.Lease
+	managed  *onnx.Session
+	session  *ort.DynamicAdvancedSession
+	slots    chan *tensorSlot
+	all      []*tensorSlot
+	runs     atomic.Uint64
 }
 
 type tensorSlot struct {
@@ -92,11 +92,8 @@ func (s *tensorSlot) close() error {
 
 func (e *engine) close() error {
 	var errs []error
-	if e.session != nil {
-		errs = append(errs, e.session.Destroy())
-	}
-	if e.compilation != nil {
-		errs = append(errs, e.compilation.Close())
+	if e.managed != nil {
+		errs = append(errs, e.managed.Close())
 	}
 	for _, s := range e.all {
 		errs = append(errs, s.close())

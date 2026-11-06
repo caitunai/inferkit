@@ -11,6 +11,7 @@ import (
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/services/imageinput"
+	"github.com/caitun/inferkit/services/imagetiming"
 	"github.com/caitun/inferkit/services/ocr"
 )
 
@@ -24,7 +25,13 @@ type TextRecognizer interface {
 func RecognizeImage(service TextRecognizer) base.HandlerFunc {
 	maxBytes, timeout, maxRequests := service.Limits()
 	h := &imageRequestHandler[ocr.Result]{check: service.Recognize, report: ocrError, busy: ocr.ErrBusy, admission: make(chan struct{}, maxRequests), maxBytes: maxBytes, timeout: timeout}
-	return func(c *base.Context) { c.Header("Cache-Control", "no-store"); h.handle(c) }
+	return func(c *base.Context) {
+		ctx, trace := imagetiming.NewOCR(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+		defer func() { trace.Finish(ctx, c.Writer.Status() < http.StatusBadRequest, c.Writer.Status()) }()
+		c.Header("Cache-Control", "no-store")
+		h.handle(c)
+	}
 }
 
 func ocrError(c *base.Context, err error) {

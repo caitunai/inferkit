@@ -16,59 +16,14 @@ const warmupTimeout = 30 * time.Second
 
 func (e *engine) createSession(c Config, plan executionPlan, m *manifest, data []byte) error {
 	backend := onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}
-	if c.CoreMLCache && backend.PreferredProvider() == coreMLProvider {
-		e.prepareCompilationCache(data, &backend)
-	}
-	configure := func(options *ort.SessionOptions) error { return configureSession(options, plan) }
-	initialBackend := backend
-	if e.compilation != nil {
-		// Retry CoreML without its derived cache before auto may fall back to CPU.
-		initialBackend.Provider = coreMLProvider
-	}
 	start := time.Now()
-	var err error
-	e.session, e.provider, err = initialBackend.Create(data, []string{m.Input.Name}, []string{m.Output.Name}, configure)
-	e.finishCompilation()
-	if err != nil && e.compilation != nil {
-		log.Warn().Err(err).Msg("cached CoreML initialization failed; retrying without compilation cache")
-		if closeErr := e.compilation.Close(); closeErr != nil {
-			return errors.Join(ErrRuntime, err, closeErr)
-		}
-		e.compilation = nil
-		backend.CacheDirectory = ""
-		e.session, e.provider, err = backend.Create(data, []string{m.Input.Name}, []string{m.Output.Name}, configure)
-	}
+	managed, err := backend.Open(data, []string{m.Input.Name}, []string{m.Output.Name}, c.CoreMLCache, func(options *ort.SessionOptions) error { return configureSession(options, plan) })
 	if err != nil {
 		return errors.Join(ErrRuntime, err)
 	}
-	log.Info().Str("execution_provider", e.provider).Bool("coreml_cache", e.compilation != nil).Dur("session_create_ms", time.Since(start)).Msg("image filter session initialized")
+	e.managed, e.session, e.provider = managed, managed.Native(), managed.Provider()
+	log.Info().Str("execution_provider", e.provider).Bool("coreml_cache", managed.CacheDirectory() != "").Dur("session_create_ms", time.Since(start)).Msg("image filter session initialized")
 	return nil
-}
-
-func (e *engine) finishCompilation() {
-	if e.compilation == nil {
-		return
-	}
-	if err := e.compilation.Finish(); err != nil {
-		log.Warn().Err(err).Msg("finish CoreML compilation cache initialization")
-	}
-	if e.provider == "cpu" {
-		if err := e.compilation.Close(); err != nil {
-			log.Warn().Err(err).Msg("release unused CoreML compilation cache")
-		}
-		e.compilation = nil
-	}
-}
-
-func (e *engine) prepareCompilationCache(data []byte, backend *onnx.Backend) {
-	cache, err := onnx.AcquireCompilationCache(data, backend.ComputeUnits)
-	if err != nil {
-		log.Warn().Err(err).Msg("CoreML compilation cache unavailable; continuing without cache")
-		return
-	}
-	e.compilation = cache
-	backend.CacheDirectory = cache.Directory()
-	log.Info().Str("directory", cache.Directory()).Msg("image filter CoreML compilation cache")
 }
 
 func (e *engine) warmup(ctx context.Context, runs int) error {

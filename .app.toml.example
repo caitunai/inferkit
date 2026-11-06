@@ -167,13 +167,21 @@ password="replace-with-at-least-16-random-characters"
 [image.ocr]
 # cpu 保持现有结果；auto 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。
 provider="cpu"
+# Empty inherits provider. On macOS ARM, compare detectionProvider="auto" and recognitionProvider="cpu".
+detectionProvider=""
+recognitionProvider=""
 coremlComputeUnits="ALL"
 # Existing `serve` command exposes POST /api/image/ocr when enabled.
 enabled=false
-# Defaults to PP-OCRv6 medium. Paths and paired dictionary are deployment settings.
-detectionModel="models/pp-ocrv6-medium/det.onnx"
-recognitionModel="models/pp-ocrv6-medium/rec.onnx"
-dictionary="models/pp-ocrv6-medium/dict.txt"
+# Prepare with scripts/prepare-ocr-models.sh; medium remains the default.
+modelSize="medium" # medium or small
+# Optional custom paths override the modelSize preset. Use the matching dictionary and pins.
+# detectionModel="/absolute/path/det.onnx"
+# recognitionModel="/absolute/path/rec.onnx"
+# dictionary="/absolute/path/dict.txt"
+warmupRuns=3 # 0 disables; maximum 10 cycles, bounded to 30 seconds.
+coremlCache=true # Per-model compilation cache in the system user cache directory.
+recognitionBatchSize=4 # Same-width, adaptive bounded batches; 0/1 selects singleton runs.
 # Optional SHA-256 pins for the exact deployed files.
 detectionSHA256=""
 recognitionSHA256=""

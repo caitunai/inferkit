@@ -10,6 +10,7 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 
 	"github.com/caitun/inferkit/services/imageinput"
+	"github.com/caitun/inferkit/services/imagetiming"
 )
 
 func detectionBoxes(ctx context.Context, values []float32, shape ort.Shape, w, h int, c Config) ([]Box, error) {
@@ -32,6 +33,9 @@ func detectionBoxes(ctx context.Context, values []float32, shape ort.Shape, w, h
 	}
 	boxes := mappedBoxes(d.boxes, cols, rows, w, h)
 	sortBoxes(boxes)
+	if trace := imagetiming.From(ctx); trace != nil {
+		trace.OCRBoxes(d.candidates, len(boxes))
+	}
 	return boxes, nil
 }
 
@@ -169,6 +173,10 @@ func sortBoxes(boxes []Box) {
 }
 
 func validProbabilities(values []float32) bool {
+	return probabilitiesValid(values)
+}
+
+func scalarProbabilitiesValid(values []float32) bool {
 	for _, v := range values {
 		if math.IsNaN(float64(v)) || v < 0 || v > 1 {
 			return false

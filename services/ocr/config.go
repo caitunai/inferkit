@@ -4,10 +4,17 @@ package ocr
 import (
 	"errors"
 	"math"
+	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/caitun/inferkit/services/onnx"
 	"github.com/spf13/viper"
+)
+
+const (
+	cpuProvider    = "cpu"
+	coreMLProvider = "coreml"
 )
 
 var (
@@ -30,27 +37,33 @@ var (
 // Config specifies local model files and bounds memory, CPU and request duration.
 // SHA256 fields are optional deployment pins; when set they must match exactly.
 type Config struct {
-	DetectionModel      string
-	RecognitionModel    string
-	Dictionary          string
-	DetectionSHA256     string
-	RecognitionSHA256   string
-	DictionarySHA256    string
-	Library             string
-	Provider            string
-	CoreMLComputeUnits  string
-	Timeout             time.Duration
-	MaxBytes            int64
-	MaxPixels           int64
-	DetectionMaxSide    int
-	RecognitionHeight   int
-	RecognitionMaxWidth int
-	MaxCandidates       int
-	MaxLines            int
-	DetectionThreshold  float64
-	BoxThreshold        float64
-	UnclipRatio         float64
-	MinConfidence       float64
+	DetectionModel       string
+	RecognitionModel     string
+	Dictionary           string
+	DetectionSHA256      string
+	RecognitionSHA256    string
+	DictionarySHA256     string
+	Library              string
+	Provider             string
+	DetectionProvider    string
+	RecognitionProvider  string
+	ModelSize            string
+	CoreMLComputeUnits   string
+	Timeout              time.Duration
+	MaxBytes             int64
+	MaxPixels            int64
+	DetectionMaxSide     int
+	RecognitionHeight    int
+	RecognitionMaxWidth  int
+	MaxCandidates        int
+	MaxLines             int
+	RecognitionBatchSize int
+	WarmupRuns           int
+	CoreMLCache          bool
+	DetectionThreshold   float64
+	BoxThreshold         float64
+	UnclipRatio          float64
+	MinConfidence        float64
 }
 
 // Configuration defaults to the PP-OCRv6 medium deployment layout. Enabling the
@@ -61,7 +74,9 @@ func Configuration(v *viper.Viper) Config {
 		Dictionary: "models/pp-ocrv6-medium/dict.txt", Timeout: 60 * time.Second, MaxBytes: 10 << 20, MaxPixels: 20_000_000,
 		DetectionMaxSide: 960, RecognitionHeight: 48, RecognitionMaxWidth: 2048,
 		MaxCandidates: 1000, MaxLines: 1000, DetectionThreshold: 0.2, BoxThreshold: 0.45, UnclipRatio: 1.4, MinConfidence: 0.5,
+		ModelSize: "medium", RecognitionBatchSize: 4, WarmupRuns: 3, CoreMLCache: true,
 	}
+	readExecution(v, &c)
 	readPaths(v, &c)
 	readLimits(v, &c)
 	return c
@@ -73,6 +88,7 @@ func readPaths(v *viper.Viper, c *Config) {
 		"dictionary": &c.Dictionary, "detectionSHA256": &c.DetectionSHA256, "recognitionSHA256": &c.RecognitionSHA256,
 		"dictionarySHA256": &c.DictionarySHA256, "library": &c.Library,
 		"provider": &c.Provider, "coremlComputeUnits": &c.CoreMLComputeUnits,
+		"detectionProvider": &c.DetectionProvider, "recognitionProvider": &c.RecognitionProvider,
 	}
 	for key, dst := range paths {
 		if v.IsSet("image.ocr." + key) {
@@ -86,11 +102,7 @@ func readLimits(v *viper.Viper, c *Config) {
 		"detectionMaxSide": &c.DetectionMaxSide, "recognitionHeight": &c.RecognitionHeight,
 		"recognitionMaxWidth": &c.RecognitionMaxWidth, "maxCandidates": &c.MaxCandidates, "maxLines": &c.MaxLines,
 	}
-	for key, dst := range ints {
-		if v.IsSet("image.ocr." + key) {
-			*dst = v.GetInt("image.ocr." + key)
-		}
-	}
+	readIntSettings(v, ints)
 	for key, dst := range map[string]*int64{"maxBytes": &c.MaxBytes, "maxPixels": &c.MaxPixels} {
 		if v.IsSet("image.ocr." + key) {
 			*dst = v.GetInt64("image.ocr." + key)
@@ -110,7 +122,31 @@ func (c Config) validate() error {
 	if c.DetectionModel == "" || c.RecognitionModel == "" || c.Dictionary == "" {
 		return ErrConfig
 	}
-	return errors.Join(c.validateResources(), c.validateShapes(), c.validateThresholds(), (onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}).Validate())
+	return errors.Join(c.validateResources(), c.validateShapes(), c.validateThresholds(), c.validateExecution())
+}
+
+func readExecution(v *viper.Viper, c *Config) {
+	if v.IsSet("image.ocr.modelSize") {
+		c.ModelSize = v.GetString("image.ocr.modelSize")
+	}
+	base := filepath.Join("models", "pp-ocrv6-"+c.ModelSize)
+	c.DetectionModel, c.RecognitionModel, c.Dictionary = filepath.Join(base, "det.onnx"), filepath.Join(base, "rec.onnx"), filepath.Join(base, "dict.txt")
+	readIntSettings(v, map[string]*int{"recognitionBatchSize": &c.RecognitionBatchSize, "warmupRuns": &c.WarmupRuns})
+	if v.IsSet("image.ocr.coremlCache") {
+		c.CoreMLCache = v.GetBool("image.ocr.coremlCache")
+	}
+}
+
+func (c Config) validateExecution() error {
+	if c.ModelSize != "" && c.ModelSize != "medium" && c.ModelSize != "small" || c.RecognitionBatchSize < 0 || c.RecognitionBatchSize > 16 || c.WarmupRuns < 0 || c.WarmupRuns > 10 {
+		return ErrConfig
+	}
+	for _, provider := range []string{c.Provider, c.DetectionProvider, c.RecognitionProvider} {
+		if err := (onnx.Backend{Provider: provider, ComputeUnits: c.CoreMLComputeUnits}).Validate(); err != nil {
+			return errors.Join(ErrConfig, err)
+		}
+	}
+	return nil
 }
 
 func (c Config) validateResources() error {
@@ -155,4 +191,17 @@ func (c Config) validateThresholds() error {
 		return ErrConfig
 	}
 	return nil
+}
+
+func readIntSettings(v *viper.Viper, settings map[string]*int) {
+	for key, dst := range settings {
+		if !v.IsSet("image.ocr." + key) {
+			continue
+		}
+		value, err := strconv.Atoi(v.GetString("image.ocr." + key))
+		if err != nil {
+			value = -1
+		}
+		*dst = value
+	}
 }

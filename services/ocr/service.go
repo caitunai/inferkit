@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"image"
@@ -13,9 +14,9 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 
 	"github.com/caitun/inferkit/services/imageinput"
+	"github.com/caitun/inferkit/services/imagetiming"
 	"github.com/caitun/inferkit/services/onnx"
 	"github.com/caitun/inferkit/services/resource"
-	"github.com/caitun/inferkit/xutil"
 )
 
 // Line contains one recognized region in orientation-corrected image coordinates.
@@ -55,10 +56,23 @@ type Service struct {
 
 // New validates deployment assets and initializes the model sessions once.
 func New(c Config) (*Service, error) {
-	return newWithPlan(c, automaticPlan(c, resource.Detect()))
+	return NewContext(context.Background(), c)
+}
+
+// NewContext completes finite OCR startup work before the caller publishes it.
+func NewContext(ctx context.Context, c Config) (*Service, error) {
+	return newWithPlanContext(ctx, c, automaticPlan(c, resource.Detect()))
 }
 
 func newWithPlan(c Config, plan executionPlan) (*Service, error) {
+	return newWithPlanContext(context.Background(), c, plan)
+}
+
+func newWithPlanContext(ctx context.Context, c Config, plan executionPlan) (*Service, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrModel, err)
+	}
+
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -74,6 +88,9 @@ func newWithPlan(c Config, plan executionPlan) (*Service, error) {
 	if err = s.loadModels(); err != nil {
 		return nil, errors.Join(err, s.closeResources())
 	}
+	if err = s.warmup(ctx); err != nil {
+		return nil, errors.Join(err, s.closeResources())
+	}
 	s.http = imageinput.NewDownloader(imageinput.Limits{Timeout: c.Timeout, MaxRequests: plan.requests, Concurrency: plan.images})
 	log.Info().Str("detection_provider", s.detector.provider).Str("recognition_provider", s.recognizer.provider).Str("image_decoder", imageinput.NativeDecoder).Int("cpus", plan.cpus).Int64("memory_bytes", plan.memory).Int("detection_threads", plan.detectionThreads).Int("recognition_threads", plan.recognitionThreads).Int("line_workers", plan.lineWorkers).Int("image_concurrency", plan.images).Int("max_requests", plan.requests).Msg("OCR automatic resource plan")
 	return s, nil
@@ -81,17 +98,27 @@ func newWithPlan(c Config, plan executionPlan) (*Service, error) {
 
 func (s *Service) loadModels() error {
 	c := s.config
-	backend := onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}
+	det := modelSettings{
+		role: "detection",
+		path: c.DetectionModel, pin: c.DetectionSHA256, threads: s.plan.detectionThreads, slots: 1, cache: c.CoreMLCache,
+		backend: onnx.Backend{Provider: cmp.Or(c.DetectionProvider, c.Provider), ComputeUnits: c.CoreMLComputeUnits},
+		input:   ort.Shape{1, 3, -1, -1}, output: ort.Shape{1, 1, -1, -1},
+	}
+	rec := modelSettings{
+		role: "recognition",
+		path: c.RecognitionModel, pin: c.RecognitionSHA256, threads: s.plan.recognitionThreads, slots: s.plan.lineWorkers, cache: c.CoreMLCache,
+		backend: onnx.Backend{Provider: cmp.Or(c.RecognitionProvider, c.Provider), ComputeUnits: c.CoreMLComputeUnits},
+		input:   ort.Shape{1, 3, int64(c.RecognitionHeight), -1}, output: ort.Shape{1, -1, int64(len(s.dictionary))},
+	}
 	var err error
-	s.detector, err = loadModel(c.DetectionModel, c.DetectionSHA256, s.plan.detectionThreads, backend, ort.Shape{1, 3, -1, -1}, ort.Shape{1, 1, -1, -1})
+	s.detector, err = loadModel(det)
 	if err != nil {
 		return err
 	}
-	s.recognizer, err = loadModel(c.RecognitionModel, c.RecognitionSHA256, s.plan.recognitionThreads, backend, ort.Shape{1, 3, int64(c.RecognitionHeight), -1}, ort.Shape{1, -1, int64(len(s.dictionary))})
+	s.recognizer, err = loadModel(rec)
 	if err != nil {
 		return err
 	}
-	// A fixed width/height export cannot serve variable-size OCR inputs.
 	if s.detector.input[2] > 0 || s.detector.input[3] > 0 || s.recognizer.input[3] > 0 {
 		return ErrModel
 	}
@@ -129,31 +156,34 @@ func (s *Service) admit(ctx context.Context) (context.Context, func(), error) {
 }
 
 // Recognize reads, decodes and processes one image within the caller's deadline.
-func (s *Service) Recognize(ctx context.Context, source imageinput.Source) (Result, error) {
-	ctx, finish, err := s.admit(ctx)
+func (s *Service) Recognize(ctx context.Context, source imageinput.Source) (result Result, returnErr error) {
+	ctx, trace, owner := imagetiming.EnsureOCR(ctx)
+	if owner {
+		defer func() { trace.Finish(ctx, returnErr == nil, 0) }()
+	}
+	done := imagetiming.Measure(ctx, imagetiming.Admission)
+	admitted, finish, err := s.admit(ctx)
+	done(err)
 	if err != nil {
 		return Result{}, err
 	}
 	defer finish()
-	// Reserve before decoding so decoded images stay within the automatic memory budget.
+	ctx = admitted
+	s.traceCapacity(trace)
+	done = imagetiming.Measure(ctx, imagetiming.SlotWait)
 	select {
 	case s.slots <- struct{}{}:
+		done(nil)
 		defer func() { <-s.slots }()
 	case <-ctx.Done():
+		done(ctx.Err())
 		return Result{}, errors.Join(ErrInference, ctx.Err())
 	}
-	data, err := imageinput.Read(ctx, s.http, source, s.config.MaxBytes)
+	img, err := s.readImage(ctx, source)
 	if err != nil {
-		return Result{}, errors.Join(ErrSource, err)
+		return Result{}, err
 	}
-	img, err := imageinput.Decode(data, s.config.MaxPixels)
-	if err != nil {
-		return Result{}, errors.Join(ErrSource, err)
-	}
-	if err = ctx.Err(); err != nil {
-		return Result{}, errors.Join(ErrInference, err)
-	}
-	return s.infer(ctx, opaqueImage(img))
+	return s.infer(ctx, img)
 }
 
 func (s *Service) infer(ctx context.Context, img *image.RGBA) (Result, error) {
@@ -162,40 +192,6 @@ func (s *Service) infer(ctx context.Context, img *image.RGBA) (Result, error) {
 		return Result{}, err
 	}
 	return s.recognizeBoxes(ctx, img, boxes)
-}
-
-func (s *Service) detect(ctx context.Context, img *image.RGBA) ([]Box, error) {
-	release, err := s.execution.acquire(ctx, s.execution.cpus)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	input, shape, err := detectionTensor(ctx, img, s.config.DetectionMaxSide)
-	if err != nil {
-		return nil, err
-	}
-	values, output, err := s.detector.run(ctx, input, shape)
-	if err != nil {
-		return nil, err
-	}
-	b := img.Bounds()
-	return detectionBoxes(ctx, values, output, b.Dx(), b.Dy(), s.config)
-}
-
-func (s *Service) recognizeBoxes(ctx context.Context, img *image.RGBA, boxes []Box) (Result, error) {
-	lines := make([]Line, len(boxes))
-	group := xutil.ErrGroup(ctx, "ocr_recognize_lines").Limit(s.plan.lineWorkers)
-	for index, box := range boxes {
-		group.Go(func(ctx context.Context) error {
-			line, err := s.recognizeLine(ctx, img, box)
-			lines[index] = line
-			return err
-		})
-	}
-	if err := group.Wait(); err != nil {
-		return Result{}, errors.Join(ErrLineRecognition, err)
-	}
-	return s.result(img, lines), nil
 }
 
 func (s *Service) result(img *image.RGBA, lines []Line) Result {
@@ -210,27 +206,6 @@ func (s *Service) result(img *image.RGBA, lines []Line) Result {
 	}
 	result.Text = strings.Join(texts, "\n")
 	return result
-}
-
-func (s *Service) recognizeLine(ctx context.Context, img *image.RGBA, box Box) (Line, error) {
-	release, err := s.execution.acquireLine(ctx)
-	if err != nil {
-		return Line{}, err
-	}
-	defer release()
-	input, shape, err := recognitionTensor(ctx, img, box, s.config.RecognitionHeight, s.config.RecognitionMaxWidth)
-	if err != nil {
-		return Line{}, err
-	}
-	values, output, err := s.recognizer.run(ctx, input, shape)
-	if err != nil {
-		return Line{}, err
-	}
-	text, confidence, err := decodeCTC(values, output, s.dictionary)
-	if err != nil {
-		return Line{}, err
-	}
-	return Line{Text: text, Confidence: confidence, Box: box}, nil
 }
 
 // Close rejects new requests, drains admitted work and releases native resources.
@@ -255,7 +230,7 @@ func (s *Service) closeResources() error {
 	}
 	for _, m := range []*model{s.recognizer, s.detector} {
 		if m != nil {
-			errs = append(errs, m.session.Destroy())
+			errs = append(errs, m.close())
 		}
 	}
 	errs = append(errs, s.lease.Close())

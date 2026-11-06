@@ -43,7 +43,7 @@ var serveCmd = &cobra.Command{
 		var recognizer *ocr.Service
 		if viper.GetBool("image.ocr.enabled") {
 			var initErr error
-			recognizer, initErr = ocr.New(ocr.Configuration(viper.GetViper()))
+			recognizer, initErr = ocr.NewContext(cmd.Context(), ocr.Configuration(viper.GetViper()))
 			if initErr != nil {
 				return errors.Join(ErrServeCommand, initErr)
 			}

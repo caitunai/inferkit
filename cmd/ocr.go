@@ -20,7 +20,7 @@ var ocrCmd = &cobra.Command{
 func init() { rootCmd.AddCommand(ocrCmd) }
 
 func runOCR(cmd *cobra.Command, args []string) (returnErr error) {
-	service, err := ocr.New(ocr.Configuration(viper.GetViper()))
+	service, err := ocr.NewContext(cmd.Context(), ocr.Configuration(viper.GetViper()))
 	if err != nil {
 		return errors.Join(ErrOCRCommand, err)
 	}

@@ -13,7 +13,7 @@ import (
 const (
 	modelMemoryReserve int64 = 512 << 20
 	// Account for both native output and its Go copy, plus per-run activations.
-	recognitionWorkingBytes int64 = 2*maxOutputElements*4 + 64<<20
+	recognitionWorkingBytes int64 = 2*maxOutputElements*4 + 64<<20 + retainedTensorBytes
 )
 
 type executionPlan struct {
@@ -24,6 +24,7 @@ type executionPlan struct {
 	lineWorkers        int
 	images             int
 	requests           int
+	batchSize          int
 }
 
 // automaticPlan partitions one machine budget across detection and line work.
@@ -32,12 +33,16 @@ func automaticPlan(c Config, b resource.Budget) executionPlan {
 	cpus := max(1, b.CPUs)
 	available := max(1, b.Memory/2-modelMemoryReserve)
 	imageBytes := c.MaxPixels*(8+imageinput.ExtraDecodeBytesPerPixel) + c.MaxBytes*2 + int64(c.DetectionMaxSide)*int64(c.DetectionMaxSide)*16
-	lineBytes := recognitionWorkingBytes + int64(c.RecognitionHeight)*int64(c.RecognitionMaxWidth)*3*4
+	inputBytes := int64(c.RecognitionHeight) * int64(c.RecognitionMaxWidth) * 3 * 4
+	perLine := 64<<20 + inputBytes
+	fixed := recognitionWorkingBytes - (64 << 20)
+	batch := int(max(1, min(int64(max(1, c.RecognitionBatchSize)), (available/2-fixed)/perLine)))
+	lineBytes := fixed + int64(batch)*perLine
 	images := int(max(1, min(int64(cpus), available/2/max(1, imageBytes))))
 	workers := int(max(1, min(int64(cpus), available/2/max(1, lineBytes))))
 	remaining := max(0, available-int64(images)*imageBytes-int64(workers)*lineBytes)
 	waiting := int(max(1, min(int64(cpus), remaining/max(1, c.MaxBytes))))
-	return executionPlan{memory: b.Memory, cpus: cpus, detectionThreads: cpus, recognitionThreads: 1, lineWorkers: workers, images: images, requests: images + waiting}
+	return executionPlan{memory: b.Memory, cpus: cpus, detectionThreads: cpus, recognitionThreads: 1, lineWorkers: workers, images: images, requests: images + waiting, batchSize: batch}
 }
 
 type executor struct {
@@ -58,6 +63,13 @@ func (e *executor) acquire(ctx context.Context, weight int64) (func(), error) {
 }
 
 func (e *executor) acquireLine(ctx context.Context) (func(), error) {
+	return e.acquireBatch(ctx, 1)
+}
+
+func (e *executor) acquireBatch(ctx context.Context, lines int) (func(), error) {
+	if lines < 1 || lines > 16 {
+		return nil, ErrConfig
+	}
 	select {
 	case e.lines <- struct{}{}:
 	case <-ctx.Done():

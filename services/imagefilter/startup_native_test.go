@@ -28,13 +28,13 @@ func validatedCoreMLCache(t *testing.T, c Config) string {
 			t.Error(closeErr)
 		}
 	}()
-	if s.engine.compilation == nil {
+	if s.engine.managed.CacheDirectory() == "" {
 		t.Skip("system CoreML cache unavailable or in use by a concurrent builder")
 	}
 	if _, err = s.Validate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return s.engine.compilation.Directory()
+	return s.engine.managed.CacheDirectory()
 }
 
 // BenchmarkCoreMLStartup separates session startup from the first user Run.

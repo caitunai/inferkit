@@ -13,9 +13,11 @@ OCR 使用 PP-OCRv6 检测模型、识别模型与配套字典，默认部署配
 
 ```bash
 bash scripts/prepare-ocr-models.sh models/pp-ocrv6-medium
+# small：
+bash scripts/prepare-ocr-models.sh --size small models/pp-ocrv6-small
 ```
 
-脚本从 Paddle 官方源下载 medium 检测及识别 ONNX 包，从固定 PaddleOCR Git 提交下载字典，校验归档、权重和字典 SHA-256 后生成 `det.onnx`、`rec.onnx`、`dict.txt`、`SHA256SUMS`。目标目录必须不存在，失败时清理临时文件。离线部署可提供包含同一版本 `det.tar`、`rec.tar`、`dict.txt` 的目录作为第二个参数。
+脚本从 Paddle 官方源下载 medium 或 small 检测及识别 ONNX 包，从固定 PaddleOCR Git 提交下载字典，校验归档、权重和字典 SHA-256 后生成 `det.onnx`、`rec.onnx`、`dict.txt`、`SHA256SUMS`。目标目录必须不存在，失败时清理临时文件。离线部署可提供包含同一版本 `det.tar`、`rec.tar`、`dict.txt` 的目录作为第二个参数。
 
 模型与字典来源为 [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR)，采用 [Apache-2.0 许可](https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE)。发布带权重的安装包时应保留其许可证及来源。
 
@@ -42,7 +44,9 @@ timeout="60s"
 
 部署可通过 Viper 配置或环境变量替换模型，例如 `IMAGE_OCR_DETECTIONMODEL`、`IMAGE_OCR_RECOGNITIONMODEL`、`IMAGE_OCR_DICTIONARY`、`IMAGE_OCR_ENABLED`。路径、校验值、资源限制在启动时读取，更换后重启进程。
 
-可配置兼容的 PP-OCRv6 small/tiny 导出模型，无需修改代码。准备脚本只下载已验证的 medium。切换模型时必须同时更换正确的识别字典和 SHA-256 配置；tiny 使用自己的字典。只支持 float32、batch=1、单输入单输出的 DB 检测和 CTC 识别模型，检测输入 H/W 及识别输入 W 必须动态。识别高度默认 48，可通过 `recognitionHeight` 与兼容导出匹配。启动时检查模型形状、类型和静态类别数；推理时再次检查实际输出与字典是否匹配。small/tiny 尚未在本次验证中运行。
+默认 `modelSize="medium"`；设置 `modelSize="small"` 会选择 `models/pp-ocrv6-small/{det.onnx,rec.onnx,dict.txt}`。显式 `detectionModel`、`recognitionModel`、`dictionary` 路径始终优先，因此切换预设时应移除旧的 medium 路径或同时改成 small 路径。旧的模型 SHA256 pin 也必须更新。两档官方模型均已用真实图片验证；small 在手写字上与 medium 存在差异，不能把模型切换当成等精度加速。
+
+支持 float32、单输入单输出 DB 检测与 CTC 识别模型；检测仍为 batch=1，动态 H/W，识别为动态 W。动态 batch 的识别模型可组批，固定 batch=1 的自定义模型继续逐行并行。识别高度默认 48，可通过 `recognitionHeight` 匹配导出。兼容的自定义 small/tiny 路径仍可使用；tiny 必须配套自己的字典。启动和每次输出都会验证形状、类型、概率与字典类别数。
 
 分类和 OCR 共用进程级 ONNX 环境；两者的 `library` 必须解析为同一配置路径。独立的引用计数保证关闭一个服务后另一个仍可使用运行库。
 
@@ -157,17 +161,18 @@ OCR_TEST_DIR=/absolute/path/to/ocr-models \
 启动：
   读取实际 CPU 与内存预算
   自动计算检测线程、文字行工作位、图片处理位和请求队列
-  加载一份检测模型和一份识别模型
+  分别选择 provider，加载一份检测模型和一份识别模型
+  复用按模型内容隔离的 CoreML 编译缓存 → 有限预热成功后就绪
 请求：
   有界准入 → 等待图片处理位 → 有界图片读取/解码
   → 获取全部 CPU 令牌 → 检测预处理、检测推理和 DB 后处理 → 释放令牌
-  → 有界并行识别文字行（每行获取一个 CPU 令牌和一个工作位）
+  → 按相同宽度分组 → 有界并行识别批次（每个 Run 获取一个 CPU 令牌和一个工作位）
   → 等待全部文字行成功 → 按原读取顺序合并 → 返回结果
 关闭：
   拒绝新请求 → 取消已准入工作 → 等待所有文字行退出 → 释放模型及共享运行库
 ```
 
-模型、输入尺寸、检测阈值、CTC 解码和结果读取顺序保持不变。并行任务把结果写回各自的索引，完成顺序不会改变返回顺序；任一任务失败或请求取消，整组取消，不返回部分结果。不增加缓存、后台预计算、数据库或 Redis 操作，图片 URL 下载仍是唯一可能的外部网络步骤。
+模型、输入尺寸、检测阈值、CTC 解码和结果读取顺序保持不变。并行任务把结果写回各自的索引，完成顺序不会改变返回顺序；任一任务失败或请求取消，整组取消，不返回部分结果。不增加识别结果缓存、后台保温、数据库或 Redis 操作；CoreML 编译产物缓存只用于模型初始化，图片 URL 下载仍是请求中唯一可能的外部网络步骤。
 
 ### CPU 与内存自动分配
 
@@ -175,9 +180,9 @@ OCR_TEST_DIR=/absolute/path/to/ocr-models \
 
 CPU 预算以可用逻辑 CPU 和 `GOMAXPROCS` 的较小值为基础。Go 1.27 的默认 `GOMAXPROCS` 会考虑 Linux CPU affinity 和 cgroup CPU 配额；资源探测还读取 cgroup v1/v2 的层级配额，处理一核或分数核容器，避免 Go 运行时最小并行度造成原生模型额外超配。支持统一层级、v1分离控制器、自定义挂载点、容器挂载根及父级更严格的限额。[Go 运行时说明](https://pkg.go.dev/runtime#GOMAXPROCS)
 
-检测模型使用 CPU 预算对应的原生线程数；识别模型每次使用一个原生线程，并由多个文字行任务填满 CPU 预算。两者共享一套加权 CPU 令牌，避免“大量并发请求 × 每个请求满核线程”叠加。空闲时不开启线程忙等，不会为了显示 CPU 100% 而空转。[ONNX Runtime 线程管理](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)
+检测模型使用 CPU 预算对应的原生线程数；识别模型每次使用一个原生线程，并由多个识别批次任务共享 CPU 预算。CPU 会按文字行数和工作位自适应控制批大小，优先保留可运行任务；CoreML 使用有界同宽批次。两者共享一套加权 CPU 令牌，避免“大量并发请求 × 每个请求满核线程”叠加。空闲时不开启线程忙等，不会为了显示 CPU 100% 而空转。[ONNX Runtime 线程管理](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)
 
-macOS 通过 `hw.memsize` 读取物理内存；Linux 读取 `/proc/meminfo` 和 cgroup v1/v2 的最严格内存限额，并保守考虑进程已有的 `GOMEMLIMIT`。探测失败时使用 512 MiB 的保守预算。采用内存预算的一半、扣除 512 MiB 模型/运行库预留后，分配图片和文字行工作位：图片按配置的最大像素、编码字节及检测张量估算；文字行计入原生输出、Go输出与激活预留。工作位数量至多为 CPU 数，低内存机器会自动减少。至少保留一张图片和一个文字行的处理能力；这是一套保守容量估算，不是原生内存的硬隔离或低内存部署成功保证。
+macOS 通过 `hw.memsize` 读取物理内存；Linux 读取 `/proc/meminfo` 和 cgroup v1/v2 的最严格内存限额，并保守考虑进程已有的 `GOMEMLIMIT`。探测失败时使用 512 MiB 的保守预算。采用内存预算的一半、扣除 512 MiB 模型/运行库预留后，分配图片和文字行工作位：图片按配置的最大像素、编码字节及检测张量估算；识别工作位按最大实际批量计入输入、原生输出、Go 输出、按行激活预留及有界张量池。工作位数量至多为 CPU 数，低内存机器会自动减少。至少保留一张图片和一个文字行的处理能力；这是一套保守容量估算，不是原生内存的硬隔离或低内存部署成功保证。
 
 请求容量由图片处理位、剩余内存和编码图片上限推导，短队列最多再容纳一个 CPU 预算数量的等待请求。超出自动容量仍返回 `429`；这是资源背压，而非固定的 4 请求限制。请求超时、字节和像素限制继续生效，避免极端输入使队列或内存无限增长。
 
@@ -216,3 +221,68 @@ OCR_TEST_DIR=/absolute/path/to/ocr-models \
 执行器和资源探测覆盖 Linux/amd64，不依赖新内核专有 API；使用已有 Debian 11 构建脚本与匹配的 ONNX Runtime，不新增 Python、OpenCV 或外部 OCR 服务。cgroup v1/v2 解析有可复现的文件系统测试，纯 Go 资源探测包可交叉编译验证；这不等于已在 Debian 11 真机测得性能。部署步骤沿用 [Debian 11 文档](DEBIAN11_DEPLOYMENT.md)。
 
 在服务器上删除旧的三个执行配置，构建并重启后核对自动方案日志。若物理服务器启用了超线程或跨 NUMA 节点，更多线程也可能受内存带宽和调度影响，需用上述基准验证实际吞吐；CPU高占用本身不代表吞吐更好。
+
+
+## 独立执行器、有限预热与编译缓存
+
+```toml
+[image.ocr]
+provider="auto" # 兼容的共同默认：auto / cpu / coreml。
+detectionProvider="auto"
+recognitionProvider="cpu"
+modelSize="medium" # 或 small；显式模型路径和 pin 仍优先。
+recognitionBatchSize=4
+warmupRuns=3
+coremlCache=true
+```
+
+`detectionProvider`、`recognitionProvider` 为空或未设置时，各自继承原 `provider`，不改变已有部署选择。显式值优先；`auto` 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。启动日志记录实际 provider，而非配置推测值。M2 Pro 对照中检测使用 CoreML、识别使用 CPU 更快，Debian CPU 服务器仍需本机验证。
+
+两个模型分别使用共享 ONNX 包的受管会话。编译缓存按实际模型内容、ORT 版本、系统构建/架构、CPU 型号和 EP 选项隔离，使用系统用户缓存目录。与图片分类共享最多 8 个目录、30 天闲置淘汰的管理规则；活跃目录持有租约，初始化时有界清理。缓存不可用时无缓存创建；缓存加载失败先重试无缓存 CoreML，`auto` 此后才可回退 CPU。CPU 模型不获取 CoreML 缓存。缓存没有识别文本或图片。[缓存规则](ONNX_DEPLOYMENT.md#图片检测启动与推理资源)
+
+默认预热 3 个周期，0 关闭，范围 0–10。每周期检测运行一次、识别运行一次：检测使用配置上限的方形尺寸，识别在宽 320 的单行与允许的最大 batch 之间交替。预热继承命令取消且总期限 30 秒；原生会话构造本身是同步 API，期限仅约束预热。失败会清理池、会话和运行库；CLI 与 API 均在预热成功后才接受用户输入。不同动态尺寸仍可能有额外首用成本，不使用后台推理保温。
+
+`OCR model initialized` 分别记录阶段、模型 SHA256、实际 provider、编译缓存状态和 `session_create_ms`；`OCR startup warmup complete` 记录预热次数、实际 batch 上限、耗时和 SIMD 后端。`NewContext` 供需要启动取消的 Go 调用方使用；原 `New` API 保留。
+
+## 批量并行、SIMD 与缓冲区
+
+`recognitionBatchSize` 默认 4，范围 0–16，0/1 采用单行 Run；自动计划还按内存下调。按完全相同的输入宽度分组，避免额外扩大 padding；读取顺序通过原索引恢复。CPU 在行数较少时保留行并行，在较多行时才组批；每个 batch 使用共享模型会话、原有 CPU 令牌和受限工作位。批量输出也按单次元素预算限制，长行可自动退回单行。任何输入、原生 Run 或 CTC 错误都会取消并排空整组，不返回部分结果。
+
+SIMD 使用 Go 1.27 的 `simd/archsimd`，用于概率有效性校验与 CTC 融合校验/argmax；无效概率拒绝规则、CTC blank/重复字符和并列最大值的首索引保持一致。构建方式：
+
+```bash
+GOEXPERIMENT=simd CGO_ENABLED=1 go build -tags vips -o inferkit .
+```
+
+arm64 直接使用内核，amd64 先检查 AVX；未启用实验、架构不支持或使用 `purego` 标签时自动走标量，不引入 CGO NEON/SSE2 内核。`tensor_backend` 表示实际选择。OCR 的 BGR 归一化、双线性采样和透视裁剪仍保持原计算规则，不套用分类模型的 320×320 libvips thumbnail。
+
+输入张量、已知形状的输出张量和 RunOptions 按模型保存在有界池中。每个 slot 独占到后处理完成，后续相同形状 Run 可直接写入复用输出，避免绑定层重复复制整块动态输出。首次或新形状仍使用原生输出探测。若兼容自定义模型的输出维度随数据变化，最多重新探测一次；取消不会重试。原生调用和取消回调结束后才可归还。空闲缓存数由工作位限制，每 slot 最多保留 32MiB，较大或失败的 slot 直接销毁；每次归还先清空像素与概率，关闭服务时销毁全部池和会话。
+
+small 在不同原生线程数下，优化前已存在约 1.57e-5 的置信度差异。批量验收固定相同 intra-op 设置、对照串行基线，保留 1e-5 置信度界限及严格文字/坐标检查；跨原生线程另外检查文字、坐标和顺序，不把浮点累加差异归给批量处理。
+
+## OCR 分阶段日志
+
+每个 HTTP 请求输出一条 `OCR timing`，包括解析错误、拒绝和取消；CLI 直接调用也可产生同样汇总。关联原 requestID，不记录识别文本、完整 URL、图片哈希或像素。
+
+- 同步阶段：`admission_ms`、`http_parse_ms`、`source_read_ms`、`decode_ms`、`opaque_ms`、`slot_wait_ms`、`detection_wait_ms`、`detection_preprocess_ms`、`detection_inference_ms`、`detection_postprocess_ms`、`recognition_wall_ms`、`result_ms`、响应/清理及 `total_ms`。
+- 并行累计：`recognition_wait_sum_ms`、`recognition_preprocess_sum_ms`、`recognition_inference_sum_ms`、`ctc_sum_ms`。这些相互重叠，不能累加到识别墙钟或总时间。
+- 有界统计：候选框、有效框、返回行数，实际批次数/行数/最大 batch、输入宽度范围，Run 的 P50/P95/P99/最大值，张量池复用/分配计数、检测尺寸、实际检测/识别 provider 及线程/工作位预算。
+
+单请求 Run 数较少时，高分位就是该请求最慢批次，不代表服务级 P99。无 Trace 的内部预热不会生成用户请求日志。HTTP `body_size` 由 Gin 记录的是响应大小，OCR 的 `image_bytes` 才是实际读取的编码图片大小。
+
+## 新实现验证
+
+模型准备脚本已对 medium/small 的离线归档、权重和字典进行校验和一致性及禁止覆盖验证。新测试覆盖同宽像素/padding、批量 CTC 顺序、SIMD 与标量的 NaN/无穷值/并列最大值、日志隐私、输出形状重试、取消及缓冲清理。真实 medium/small 还验证批量/串行文本、坐标、置信度和 CPU/CoreML/混合执行器。
+
+```bash
+OCR_TEST_DIR=/absolute/path/to/model-and-fixture OCR_TEST_COREML=1 \
+  GOEXPERIMENT=simd CGO_ENABLED=1 go test -tags vips ./services/ocr -count=1
+OCR_TEST_DIR=/absolute/path/to/model-and-fixture \
+  OCR_TEST_IMAGE=/absolute/path/to/test.jpeg GOEXPERIMENT=simd CGO_ENABLED=1 \
+  go test -tags vips ./services/ocr -run '^$' -bench '^BenchmarkOCRPipeline$' \
+  -benchtime=10x -count=3 -benchmem
+```
+
+`OCR_TEST_DIR` 需包含模型、字典及既有测试用的登机牌 sample.png；基准的 `OCR_TEST_IMAGE` 可指定其他原图。正式上线还应使用业务标注集、真实 URL/上传和目标并发，比较冷启动、间隔请求与稳定吞吐。可通过 `recognitionBatchSize=1`、`warmupRuns=0`、`coremlCache=false` 分别回退；旧统一 provider 仍有效。
+
+本轮 medium/small、provider、启动及分配的实测数据见 [OCR 优化对照](OCR_OPTIMIZATION.md)。

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -42,12 +43,23 @@ const (
 	Persist
 	HTTPResponse
 	HTTPCleanup
+	Opaque
+	DetectionWait
+	DetectionPreprocess
+	DetectionInference
+	DetectionPostprocess
+	Recognition
+	RecognitionWait
+	RecognitionPreprocess
+	RecognitionInference
+	CTC
 	stageCount
 )
 
 var stageNames = [stageCount]string{
 	"admission", "http_parse", "source_read", "hash", "cache_lookup", "cache_wait", "slot_wait",
 	"decode", "preprocess", "native_pipeline", "native_header", "native_prepare", "native_eval", "native_cleanup", "convert", "resize", "premultiply", "resize_horizontal", "resize_vertical", "unpremultiply", "tensor", "inference", "result", "cache_store", "persist", "http_response", "http_cleanup",
+	"opaque", "detection_wait", "detection_preprocess", "detection_inference", "detection_postprocess", "recognition_wall", "recognition_wait_sum", "recognition_preprocess_sum", "recognition_inference_sum", "ctc_sum",
 }
 
 type contextKey struct{}
@@ -55,6 +67,7 @@ type contextKey struct{}
 // Trace belongs to one HTTP request or CLI detection. It never stores image data,
 // URLs, hashes, credentials or error messages. The mutex also permits shared callers.
 type Trace struct {
+	ocr           *ocrMetrics
 	started       time.Time
 	source        string
 	cache         string
@@ -238,25 +251,43 @@ func (t *Trace) Finish(ctx context.Context, success bool, status int) {
 	elapsed := time.Since(t.started)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	event := log.Ctx(ctx).Info().Bool("success", success).Int("status", status).
-		Float64("total_ms", milliseconds(elapsed)).Str("source_type", t.source).
-		Str("cache_state", t.cache).Str("persist_state", t.persistence).Str("failed_stage", t.failed).
-		Int("image_bytes", t.bytes).Int("image_width", t.width).Int("image_height", t.height).
-		Str("execution_provider", t.provider).Str("decode_backend", t.decoder).Str("resize_backend", t.resizeBackend).Str("pixel_type", t.pixels).Str("image_format", t.format).Uint64("inference_attempt", t.attempt).Int("resize_workers", t.resizeWorkers).
-		Int("active_requests", t.active).Int("max_requests", t.capacity).
-		Int("image_concurrency", t.workers).Int("threads", t.threads)
-	event = event.Str("preprocess_backend", t.preprocessor).Str("preprocess_profile", t.profile).Str("tensor_backend", t.tensorBackend)
-	if t.jpegLoader != "" {
-		event = event.Str("jpeg_loader", t.jpegLoader).Int("jpeg_shrink_on_load", t.jpegShrink).
-			Int("jpeg_decode_width", t.jpegWidth).Int("jpeg_decode_height", t.jpegHeight).
-			Int("jpeg_loader_builds", t.jpegBuilds).Bool("jpeg_multiscan", t.jpegMultiscan)
+	event := log.Ctx(ctx).Info()
+	t.summary(event, success, status, elapsed)
+	message := "image filter timing"
+	if t.ocr != nil {
+		t.ocr.fields(event)
+		message = "OCR timing"
+	} else {
+		t.imageFields(event)
 	}
 	for stage, duration := range t.durations {
 		if t.seen[stage] {
 			event = event.Float64(stageNames[stage]+"_ms", milliseconds(duration))
 		}
 	}
-	event.Msg("image filter timing")
+	event.Msg(message)
+}
+
+func (t *Trace) summary(event *zerolog.Event, success bool, status int, elapsed time.Duration) {
+	event.Bool("success", success).Int("status", status).
+		Float64("total_ms", milliseconds(elapsed)).Str("source_type", t.source).Str("failed_stage", t.failed).
+		Int("image_bytes", t.bytes).Int("image_width", t.width).Int("image_height", t.height).
+		Str("decode_backend", t.decoder).Str("pixel_type", t.pixels).Str("image_format", t.format).
+		Str("tensor_backend", t.tensorBackend)
+}
+
+func (t *Trace) imageFields(event *zerolog.Event) {
+	event.Str("cache_state", t.cache).Str("persist_state", t.persistence).
+		Str("execution_provider", t.provider).Str("resize_backend", t.resizeBackend).
+		Uint64("inference_attempt", t.attempt).Int("resize_workers", t.resizeWorkers).
+		Int("active_requests", t.active).Int("max_requests", t.capacity).
+		Int("image_concurrency", t.workers).Int("threads", t.threads)
+	event.Str("preprocess_backend", t.preprocessor).Str("preprocess_profile", t.profile)
+	if t.jpegLoader != "" {
+		event.Str("jpeg_loader", t.jpegLoader).Int("jpeg_shrink_on_load", t.jpegShrink).
+			Int("jpeg_decode_width", t.jpegWidth).Int("jpeg_decode_height", t.jpegHeight).
+			Int("jpeg_loader_builds", t.jpegBuilds).Bool("jpeg_multiscan", t.jpegMultiscan)
+	}
 }
 
 func milliseconds(duration time.Duration) float64 {

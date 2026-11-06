@@ -7,9 +7,6 @@ import (
 )
 
 func decodeCTC(values []float32, shape ort.Shape, dictionary []string) (string, float64, error) {
-	if len(shape) != 3 || shape[0] != 1 || shape[1] < 1 || shape[2] != int64(len(dictionary)) {
-		return "", 0, ErrInference
-	}
 	if !validRecognitionOutput(values, shape, len(dictionary)) {
 		return "", 0, ErrInference
 	}
@@ -18,7 +15,10 @@ func decodeCTC(values []float32, shape ort.Shape, dictionary []string) (string, 
 	previous, count, total := -1, 0, float64(0)
 	for step := range len(values) / classes {
 		row := values[step*classes : (step+1)*classes]
-		best := argmax(row)
+		best, valid := probabilityArgmax(row)
+		if !valid {
+			return "", 0, ErrInference
+		}
 		if best != 0 && best != previous {
 			tokens = append(tokens, dictionary[best])
 			count++
@@ -33,15 +33,5 @@ func decodeCTC(values []float32, shape ort.Shape, dictionary []string) (string, 
 }
 
 func validRecognitionOutput(values []float32, shape ort.Shape, classes int) bool {
-	return classes > 0 && len(values)%classes == 0 && int64(len(values)/classes) == shape[1] && validProbabilities(values)
-}
-
-func argmax(values []float32) int {
-	best := 0
-	for i, v := range values {
-		if v > values[best] {
-			best = i
-		}
-	}
-	return best
+	return len(shape) == 3 && shape[0] == 1 && shape[1] > 0 && classes > 0 && shape[2] == int64(classes) && len(values)%classes == 0 && int64(len(values)/classes) == shape[1]
 }
