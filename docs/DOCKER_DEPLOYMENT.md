@@ -16,7 +16,7 @@ Debian 13 是容器内的运行环境，宿主机可以继续使用 Debian 11；
 工作流文件为 `.github/workflows/docker.yml`，名称是 **Debian 13 amd64 image**：
 
 - 推送 `main` / `master`、推送 `v*` 标签时构建并发布；仓库默认分支更新 `latest`，版本标签生成同名镜像标签。
-- 每次发布同时生成 `sha-<完整提交 SHA>` 标签。
+- 默认分支同时更新 `debian13` 标签，版本标签另外生成 `vX.Y.Z-debian13`；每次发布仍生成 `sha-<完整提交 SHA>`。
 - PR 构建检查镜像，不登录任何镜像仓库、不推送。
 - Actions 页面可手动执行；勾选 `no_cache` 可刷新全部构建层中的系统与依赖包。
 
@@ -32,7 +32,13 @@ ghcr.io/example/inferkit:sha-<完整提交SHA>
 ghcr.io/example/inferkit:v1.0.0    # 推送对应 Git 标签时生成
 ```
 
-工作流先构建并载入镜像，再检查 Debian 13、amd64、非 root 身份、程序动态依赖和 CLI 可执行性，最后推送**同一份已检查的镜像**，不会在测试后重新构建另一份。构建过程也会在实际运行镜像的基础环境中，以最终服务账户初始化 ONNX Runtime、创建 / 释放张量；测试二进制仅留在中间构建层。
+工作流先构建并载入镜像，再检查 Debian 13、amd64、非 root 身份、程序动态依赖和 CLI 可执行性，最后推送**同一份已检查的镜像**，不会在测试后重新构建另一份。
+
+构建过程在最终运行库环境中，以 UID 10001 检查 ONNX Runtime C API/张量生命周期、OCR CTC/SIMD 与关闭 AVX 后的回退，并验证 JPEG/PNG/WebP/AVIF 的 libvips 预处理、10 位 AVIF、缩小解码和透明补白。测试程序及其素材仅在中间构建层中，最终镜像只复制成功标记。
+
+发布前运行 `scripts/test-inference-image.py`，在构建和缓存导出结束后下载并校验官方 PP-OCRv6 small 权重，挂载到已经构建好的镜像中。模型在宿主机临时目录，不进入镜像、构建上下文或 BuildKit 缓存。容器以非 root、只读根文件系统、禁用网络、2 CPU/4GiB 的预算执行，临时文件放在 `/tmp`；完成或超时都会清理本次容器和临时模型。
+
+验收包含十二行合成文字的连续两次识别，以及四格式原有合成图片，必须满足：识别出文字、输入尺寸正确、两阶段实际使用 CPU、有限预热 3 轮、批量识别生效、重复输入复用缓冲区，以及 JPEG/WebP 使用 libvips 解码。缺少对应阶段日志或任何检查失败都会阻止发布。无 AVX 的机器允许 Go 标量回退；不以 SIMD 名称代替结果验收。
 
 镜像以 amd64 原生 runner 构建，不需要 QEMU。中间层通过 GitHub Actions cache 复用。首次构建包含 Go / npm 依赖、前端、测试及原生库下载，后续构建会复用缓存。
 
@@ -48,7 +54,7 @@ ghcr.io/example/inferkit:v1.0.0    # 推送对应 Git 标签时生成
 | Repository secret | `DOCKERHUB_TOKEN` | 对目标仓库具有推送权限的 Docker Hub Access Token |
 | Repository variable，可选 | `DOCKERHUB_IMAGE` | `namespace/repository`，如 `my-org/inferkit`；默认 `<DOCKERHUB_USERNAME>/<GitHub仓库名>` |
 
-提前创建相应 Docker Hub 仓库，并保证登录账户和 Token 有推送权限。组织仓库通过 `DOCKERHUB_IMAGE` 指定；该变量也接受 `docker.io/namespace/repository`，不附带标签。镜像名称统一转为小写，Docker Hub 和 GHCR 使用同样的 `latest`、版本和提交 SHA 标签。
+提前创建相应 Docker Hub 仓库，并保证登录账户和 Token 有推送权限。组织仓库通过 `DOCKERHUB_IMAGE` 指定；该变量也接受 `docker.io/namespace/repository`，不附带标签。镜像名称统一转为小写，Docker Hub 和 GHCR 使用同样的 `latest`、`debian13`、版本（含 `-debian13` 版本别名）和提交 SHA 标签。
 
 例如 `DOCKERHUB_USERNAME=example`、GitHub 仓库名为 `inferkit` 时，还会发布：
 
@@ -156,27 +162,70 @@ docker buildx build --pull --platform linux/amd64 --load -t inferkit:debian13 .
 
 在 ARM64 开发机上执行该命令需要 Docker 的 amd64 模拟支持；发布工作流只使用原生 amd64 runner。私有业务模型不会放进公开构建上下文，镜像中的原生库测试不代表已对真实模型完成 Linux 分类准确率或性能验收，部署时仍应执行上述 `validate`。
 
-当前开发环境没有 Docker CLI / Engine，未在本机实际构建或推送镜像。首次完整镜像构建与运行检查会在工作流提交、推送到 GitHub 后执行。
+当前开发环境没有 Docker CLI / Engine，未在本机实际构建或推送镜像。完整 Linux 镜像构建、最终运行库检查及真实容器 OCR 验收会在工作流提交、推送到 GitHub 后执行。本机已验证 workflow 语法、部署检查脚本、Compose YAML，以及同一合成图片/四格式输入在 macOS CPU small 上的真实识别和验收逻辑；这不能替代 Linux 容器检查。
 
 实现参考：[Debian 13 发布信息](https://www.debian.org/releases/trixie/)、[Docker 构建后测试再推送](https://docs.docker.com/build/ci/github-actions/test-before-push/)、[GitHub 发布镜像到 GHCR](https://docs.github.com/en/actions/tutorials/publish-packages/publish-docker-images)、[Docker Hub 与 GHCR 同时发布](https://docs.docker.com/build/ci/github-actions/push-multi-registries/)。
 
 ## 启用 OCR
 
-OCR 模型准备与配置见 [OCR 文档](OCR.md)。镜像复用已安装的 ONNX Runtime；将模型目录以只读方式挂载到 `/models/ocr`，并在外部配置中设置 `image.ocr.enabled=true`、检测/识别模型及配套字典的容器内绝对路径。
+镜像同时包含分类和 OCR 实现，保留默认 `image-filter serve` 的部署方式。OCR API 沿用现有 `serve` 命令，不增加 `ocr serve`。完整 `serve` 会初始化 Redis/队列，因此启用时必须继续提供现有 `[redis]`、`[queue]` 配置；Redis 可位于其他容器或现有服务器，不包含在推理镜像中。配置键参考根目录 `.app.toml.example`，容器中的 `localhost` 指向自身。
 
-当前镜像默认启动 `image-filter serve`。要启用 OCR，请通过 Compose override 将服务命令改成现有 `serve`（需要现有 Redis/队列配置），例如：
+将 `deploy/docker/compose.ocr.yaml` 复制到部署目录，和原 `compose.yaml` 合并使用。保留 `app.toml` 中现有鉴权密钥、Redis/队列设置；在 Docker 配置示例新增的 `[image.ocr]` 中设置：
 
-```yaml
-services:
-  inferkit:
-    command: ["--config", "/etc/inferkit/app.toml", "serve"]
-    volumes:
-      - type: bind
-        source: ./pp-ocrv6-medium
-        target: /models/ocr
-        read_only: true
-        bind:
-          create_host_path: false
+```toml
+[image.ocr]
+enabled=true
+modelSize="small" # 默认仍是 medium；本例选择 small。
+provider="cpu"
+detectionProvider="cpu"
+recognitionProvider="cpu"
+detectionModel="/models/ocr/det.onnx"
+recognitionModel="/models/ocr/rec.onnx"
+dictionary="/models/ocr/dict.txt"
+library="/opt/onnxruntime/lib/libonnxruntime.so.1"
+warmupRuns=3
+recognitionBatchSize=4
+coremlCache=true # CPU 会话不创建 CoreML 缓存。
 ```
 
-配置中的模型路径使用 `/models/ocr/det.onnx`、`/models/ocr/rec.onnx`、`/models/ocr/dict.txt`；分类与OCR的 `library` 均配置为 `/opt/onnxruntime/lib/libonnxruntime.so.1`。如果只启用OCR，请清空 `image.filter.model`、移除不再需要的分类模型挂载，并将镜像健康检查路径从 `/image-filter` 改为 `/`。OCR不新增独立服务命令。
+在仓库中准备模型，或使用已校验的离线模型包。目录必须尚不存在：
+
+```bash
+bash scripts/prepare-ocr-models.sh --size small /srv/inferkit/pp-ocrv6-small
+```
+
+模型权重与字典的 SHA256 可从生成的 `SHA256SUMS` 填入 OCR 配置，以固定实际部署文件。切换 medium/small 时必须成对更换模型，并同步更新旧的 pin；显式路径优先于 `modelSize` 预设。默认仍为 medium，不会在服务启动时自动下载模型。两档模型的识别差异见 [OCR 优化报告](OCR_OPTIMIZATION.md)。
+
+```bash
+cd /srv/inferkit
+export INFERKIT_IMAGE=ghcr.io/example/inferkit:debian13
+export INFERKIT_OCR_MODEL=./pp-ocrv6-small
+# 若未拉取新镜像，先执行 pull；后续管理命令也保留这两个 -f。
+docker compose -f compose.yaml -f compose.ocr.yaml pull
+docker compose -f compose.yaml -f compose.ocr.yaml up -d
+docker compose -f compose.yaml -f compose.ocr.yaml logs --tail=100 inferkit
+```
+
+`INFERKIT_OCR_MODEL` 也可指向准备好的 medium 目录。override 将模型只读挂载至 `/models/ocr`，保留已有分类模型挂载，将命令切换为 `serve`，健康检查访问真实 OCR 页面 `/ocr`（启动宽限期 90 秒）。分类与 OCR 的 `library` 使用同一 `/opt/onnxruntime/lib/libonnxruntime.so.1`。若只启用 OCR，清空 `image.filter.model` 并从本地基础 Compose 删除分类模型 bind；健康检查继续使用 `/ocr`。
+
+OCR 页面为 `/ocr`，鉴权 API 为 `POST /api/image/ocr`；文件上传、粘贴和 URL 沿用现有功能，详见 [OCR 文档](OCR.md)。首次加载日志应包含两个模型的实际 `execution_provider=cpu`、预热完成和自动资源计划；每次请求有 `OCR timing`。Debian CPU 不启用 CoreML；SIMD 按 CPU 能力选择，线程和并发继续自动计算。
+
+同一镜像也可覆盖命令执行 OCR CLI，不启动 Redis：
+
+```bash
+docker compose -f compose.yaml -f compose.ocr.yaml run --rm --no-deps \
+  -v /absolute/path/to/images:/input:ro inferkit \
+  --config /etc/inferkit/app.toml ocr /input/page.png
+```
+
+## 复现镜像发布前验收
+
+安装并启动 amd64 Docker Engine 后，先按上文构建镜像，再运行：
+
+```bash
+python3 scripts/test-inference-image.py inferkit:debian13
+# 离线验收：使用已经准备并校验的 small 模型目录，跳过下载。
+python3 scripts/test-inference-image.py inferkit:debian13 --models /absolute/path/to/pp-ocrv6-small
+```
+
+脚本使用已存在的镜像，不自动拉取镜像；推理容器没有网络。默认只下载官方公开测试权重，不接触业务配置或私有训练模型。合成文字图位于 `services/ocr/testdata/ci.png`，不含用户图片。该验收确认部署功能和优化已接通，不构成业务准确率、Debian 性能或并发 SLO 结论。

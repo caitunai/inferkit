@@ -40,5 +40,25 @@ cacheTTL="5m"
 [image.review]
 enabled=false
 
+[image.ocr]
+# Requires compose.ocr.yaml and existing Redis/queue configuration for `serve`.
+enabled=false
+modelSize="medium" # Or small; mount the matching prepared directory at /models/ocr.
+provider="cpu"
+detectionProvider="cpu"
+recognitionProvider="cpu"
+detectionModel="/models/ocr/det.onnx"
+recognitionModel="/models/ocr/rec.onnx"
+dictionary="/models/ocr/dict.txt"
+library="/opt/onnxruntime/lib/libonnxruntime.so.1"
+warmupRuns=3
+coremlCache=true # CPU sessions do not acquire CoreML cache directories.
+recognitionBatchSize=4
+timeout="60s"
+# Optional pins for the exact mounted model pair and dictionary.
+detectionSHA256=""
+recognitionSHA256=""
+dictionarySHA256=""
+
 [ui]
 assetMode="embedded"
