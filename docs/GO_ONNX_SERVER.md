@@ -182,7 +182,7 @@ IMAGE_FILTER_BYPASSCACHE=true ./inferkit --config .app.toml serve
 
 ## 自动资源分配
 
-不再读取 `image.filter.concurrency`、`image.filter.threads` 和 `image.filter.maxRequests`。旧配置即使存在也不会固定执行容量，建议删除；模型路径、缓存容量/TTL、超时、字节和像素限制仍按原配置生效。启动时记录 `image filter automatic resource plan`，输出 `cpus`、`memory_bytes`、`threads`、`image_concurrency`、`max_requests`，以及部署模型的 `model_sha256` 和实际加载的 `onnxruntime_version`。模型指纹用于核对基准与部署资产，不是图片内容哈希。
+`image.filter.concurrency` 和 `image.filter.maxRequests` 不再生效。`image.filter.threads` 支持 `"auto"`、整数 0（均表示自动），或如 4 的正整数；线程数与并发容量共同预算，而非独立上限。启动时记录 `image filter automatic resource plan`，输出 `cpus`、`memory_bytes`、`threads`、`image_concurrency`、`max_requests`，以及部署模型的 `model_sha256` 和实际加载的 `onnxruntime_version`。模型指纹用于核对基准与部署资产，不是图片内容哈希。
 
 启动时调用与 OCR 共用的 `services/resource`：CPU 取可用逻辑 CPU、`GOMAXPROCS` 和 Linux cgroup v1/v2 层级配额的较小值；macOS 读取物理内存，Linux 结合物理内存与 cgroup 内存限额，并保守考虑 `GOMEMLIMIT`。探测失败采用 512 MiB 内存预算。Debian 11 的 v1/v2、自定义挂载点和父级限额沿用已有资源探测，不增加平台依赖。更改容器资源、CPU affinity 或 `GOMAXPROCS` 后需重启，重新建立原生线程池和处理位。
 
@@ -191,19 +191,23 @@ IMAGE_FILTER_BYPASSCACHE=true ./inferkit --config .app.toml serve
 ```text
 可分配内存 = max(1, 有效内存 / 2 - 512 MiB 模型及运行库预留)
 编码图片预算 = max(1, 2 × maxBytes)
-单处理位预算 = 12 × maxPixels + 输入张量字节数 + 64 MiB 激活及缩放预留
-目标算子线程 = min(CPU 数, max(2, ceil(CPU 数 / 8)))
+单处理位预算 = 48 × maxPixels + 输入张量字节数 + 64 MiB 激活及缩放预留
+自动起点 = CPU provider 为 4，CoreML provider 为 2
+目标算子线程 = min(CPU 数, max(自动起点, ceil(CPU 数 / 8)))
+显式正整数 threads 时：目标算子线程 = min(CPU 数, threads)
 调用者预算 = CPU 数 - 目标算子线程 + 1
 处理位 = max(1, min(调用者预算, 可分配内存 / (单处理位预算 + 2 × 编码图片预算)))
-原生算子线程 = CPU 数 - 处理位 + 1
+原生算子线程 = 目标算子线程
 剩余内存 = max(0, 可分配内存 - 处理位 × (单处理位预算 + 编码图片预算))
 等待容量 = max(1, min(CPU 数, 剩余内存 / 编码图片预算))
 请求容量 = 处理位 + 等待容量
 ```
 
-除 `ceil` 外，以上除法向下取整。多核机器不再默认只给模型一个线程。分类服务只有一个 ONNX 会话，配置 N 个算子线程时，它拥有 N−1 个额外共享工作线程，当前调用线程也参与计算；因此共同预算并发调用者和共享线程池，使 `处理位 + 算子线程 − 1 = CPU 数`，并非每个处理位独立创建一整套线程池。基于单图延迟与并发负载对照，先按约每 8 个 CPU 分配一个算子线程且多核至少 2 线程，让多数 CPU 保留给并发图片；内存较少时减少处理位并增加共享算子线程。这是一项自动启发式分配，不代表每个 CPU/模型组合的最优值，也不会在启动时运行额外校准。[ONNX 线程池说明](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)
+除 `ceil` 外，以上除法向下取整。分类服务只有一个 ONNX 会话，配置 N 个算子线程时，它拥有 N−1 个额外共享工作线程，当前调用线程也参与计算；因此共同预算并发调用者和共享线程池，使 `处理位 + 算子线程 − 1 ≤ CPU 数`，并非每个处理位独立创建一整套线程池。CPU 自动方案以 4 线程为起点兼顾单图延迟，CoreML 保留较小 CPU 池；内存较少时减少处理位，不反向扩大显式线程数。这是一项自动启发式分配，不代表每个 CPU/模型组合的最优值，也不会在启动时运行额外校准。[ONNX 线程池说明](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)
 
-本机 10 个 CPU、32 GiB 内存对应 2 个算子线程、9 个处理位、19 个请求容量；单核仍只能使用 1 线程。至少保留一个处理位；容量是保守估计，包含部分原生工作内存预留，不是原生内存硬隔离或低内存部署成功保证。超出自动请求容量仍返回 `429`。
+本机 10 个 CPU、32 GiB 内存，CPU provider 自动为 4 个算子线程、7 个处理位、17 个请求容量；CoreML 自动为 2 个算子线程、9 个处理位、19 个请求容量。单核仍只能使用 1 线程。至少保留一个处理位；容量是保守估计，包含部分原生工作内存预留，不是原生内存硬隔离或低内存部署成功保证。超出自动请求容量仍返回 `429`。
+
+默认 `warmupRuns=3`，在 HTTP 启动之前有限预热，支持取消且最多 30 秒；`warmupRuns=0` 可关闭。默认 `coremlCache=true`，在系统用户缓存目录复用按模型内容和运行环境隔离的 CoreML 编译产物，与图片结果缓存无关。缓存最多保留 8 个目录，30 天未使用且没有活跃会话保护的目录在后续初始化时清理；不可用时回退无缓存启动。完整规则及回滚选项见 [部署说明](ONNX_DEPLOYMENT.md#图片检测启动与推理资源)。
 
 缩放只借用当前空闲的调用者/张量处理位，已有请求占用的位不会被抢占；不在读取或解码期间借位。每个阶段按行分块，通过 `xutil.ErrGroup` 等待全部行完成，再进入下一阶段。缩放结束、取消或失败后先排空行任务，再归还借位，随后生成张量。多请求繁忙时自然减少行工作数，不增加一套与推理竞争的固定线程池。低于一个模型输入面积或不需缩放的图片串行准备，日志 `resize_workers` 是本次实际使用数。像素内部累加、横纵阶段顺序和每遍裁剪均保持不变。
 

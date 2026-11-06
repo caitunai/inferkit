@@ -14,24 +14,27 @@ const (
 	providerCoreML = "coreml"
 	providerAuto   = "auto"
 	platformDarwin = "darwin"
+	computeAll     = "ALL"
 )
 
 // Backend selects an execution provider. The zero value preserves CPU execution.
 type Backend struct {
-	Provider     string
-	ComputeUnits string
+	Provider       string
+	ComputeUnits   string
+	CacheDirectory string
 }
 
 // Validate rejects unknown providers and CoreML options before loading a model.
 func (b Backend) Validate() error {
 	if !slices.Contains([]string{"", providerCPU, providerAuto, providerCoreML}, b.Provider) ||
-		!slices.Contains([]string{"", "ALL", "CPUOnly", "CPUAndGPU", "CPUAndNeuralEngine"}, b.ComputeUnits) {
+		!slices.Contains([]string{"", computeAll, "CPUOnly", "CPUAndGPU", "CPUAndNeuralEngine"}, b.ComputeUnits) {
 		return ErrConfig
 	}
 	return nil
 }
 
-func (b Backend) provider() string {
+// PreferredProvider resolves platform selection before any initialization fallback.
+func (b Backend) PreferredProvider() string {
 	if b.Provider == providerCoreML || b.Provider == providerAuto && runtime.GOOS == platformDarwin && runtime.GOARCH == "arm64" {
 		return providerCoreML
 	}
@@ -44,7 +47,7 @@ func (b Backend) Create(data []byte, inputs, outputs []string, configure func(*o
 	if err := b.Validate(); err != nil {
 		return nil, "", err
 	}
-	provider := b.provider()
+	provider := b.PreferredProvider()
 	session, err := b.create(data, inputs, outputs, configure, provider)
 	if err != nil && provider == providerCoreML && b.Provider == providerAuto {
 		log.Warn().Err(err).Msg("CoreML session initialization failed; retrying CPU")
@@ -85,16 +88,24 @@ func (b Backend) appendCoreML(options *ort.SessionOptions) error {
 	if runtime.GOOS != platformDarwin {
 		return ErrConfig
 	}
-	units := b.ComputeUnits
-	if units == "" {
-		units = "ALL"
+	settings := b.coreMLOptions()
+	if b.CacheDirectory != "" {
+		settings["ModelCacheDirectory"] = b.CacheDirectory
 	}
-	if err := options.AppendExecutionProviderCoreMLV2(map[string]string{
-		"ModelFormat": "MLProgram", "MLComputeUnits": units,
-		"RequireStaticInputShapes": "0", "EnableOnSubgraphs": "0",
-		"AllowLowPrecisionAccumulationOnGPU": "0",
-	}); err != nil {
+	if err := options.AppendExecutionProviderCoreMLV2(settings); err != nil {
 		return errors.Join(ErrRuntime, err)
 	}
 	return nil
+}
+
+func (b Backend) coreMLOptions() map[string]string {
+	units := b.ComputeUnits
+	if units == "" {
+		units = computeAll
+	}
+	return map[string]string{
+		"ModelFormat": "MLProgram", "MLComputeUnits": units,
+		"RequireStaticInputShapes": "0", "EnableOnSubgraphs": "0",
+		"AllowLowPrecisionAccumulationOnGPU": "0",
+	}
 }

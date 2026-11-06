@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json/v2"
 	"errors"
 
@@ -34,7 +35,7 @@ func init() {
 }
 
 func serveImageFilter(cmd *cobra.Command, _ []string) error {
-	return withImageFilter(func(service *imagefilter.Service) error {
+	return withImageFilter(cmd.Context(), func(service *imagefilter.Service) error {
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
 		if err := configureImageServer(cmd.Context(), s, service); err != nil {
 			return err
@@ -57,8 +58,8 @@ func validateImageFilter(cmd *cobra.Command, _ []string) error {
 	})
 }
 
-func withImageFilter(run func(*imagefilter.Service) error) (returnErr error) {
-	service, err := imagefilter.New(imagefilter.Configuration(viper.GetViper()))
+func withImageFilter(ctx context.Context, run func(*imagefilter.Service) error) (returnErr error) {
+	service, err := imagefilter.NewContext(ctx, imagefilter.Configuration(viper.GetViper()))
 	if err != nil {
 		return errors.Join(ErrImageFilterCommand, err)
 	}
@@ -81,5 +82,5 @@ func withImageDetector(cmd *cobra.Command, run func(imagefilter.Detector) error)
 	if err != nil {
 		return errors.Join(ErrImageFilterCommand, err)
 	}
-	return withImageFilter(func(service *imagefilter.Service) error { return run(service.WithBackend(backend)) })
+	return withImageFilter(cmd.Context(), func(service *imagefilter.Service) error { return run(service.WithBackend(backend)) })
 }

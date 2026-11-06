@@ -76,7 +76,8 @@ func benchmarkFilterImages(b *testing.B, service imageDetector, images [][]byte,
 func BenchmarkFilterSizedLoad(b *testing.B) {
 	c := nativeConfig(b)
 	c.CacheEntries = 0
-	cpus := resource.Detect().CPUs
+	budget := resource.Detect()
+	cpus := budget.CPUs
 	images := make([][]byte, 8)
 	for i := range images {
 		images[i] = profilePNG(b, byte(i))
@@ -85,7 +86,10 @@ func BenchmarkFilterSizedLoad(b *testing.B) {
 	slices.Sort(candidates)
 	for _, threads := range slices.Compact(candidates) {
 		workers := max(1, cpus-threads+1)
-		plan := executionPlan{cpus: cpus, threads: threads, concurrency: workers, requests: max(8, workers+cpus)}
+		plan := executionPlan{memory: budget.Memory, cpus: cpus, threads: threads, concurrency: workers, requests: max(8, workers+cpus)}
+		if threads > 1 {
+			plan.spinMicros = operatorSpinMicros
+		}
 		for _, callers := range []int{1, 8} {
 			b.Run("threads_"+strconv.Itoa(threads)+"/callers_"+strconv.Itoa(callers), func(b *testing.B) {
 				service := nativeServiceWithPlan(b, c, plan)

@@ -11,11 +11,14 @@ import (
 )
 
 const (
-	backendGo   = "go"
-	imageSize   = 320
-	channels    = 3
-	pixelMax    = 255
-	inputLength = channels * imageSize * imageSize
+	backendGo         = "go"
+	coreMLProvider    = "coreml"
+	imageSize         = 320
+	channels          = 3
+	pixelMax          = 255
+	inputLength       = channels * imageSize * imageSize
+	defaultWarmupRuns = 3
+	maximumWarmupRuns = 10
 )
 
 var (
@@ -58,6 +61,9 @@ type Config struct {
 	MaxBytes           int64
 	MaxPixels          int64
 	CacheEntries       int
+	Threads            int
+	WarmupRuns         int
+	CoreMLCache        bool
 	BypassCache        bool
 }
 
@@ -67,9 +73,10 @@ func Configuration(v *viper.Viper) Config {
 		Model: v.GetString("image.filter.model"), Library: v.GetString("image.filter.library"),
 		Timeout: 30 * time.Second, CacheTTL: 5 * time.Minute,
 		MaxBytes: 10 << 20, MaxPixels: 20_000_000,
-		CacheEntries: 1024,
+		CacheEntries: 1024, WarmupRuns: defaultWarmupRuns, CoreMLCache: true,
 	}
 	readLimits(v, &c)
+	readExecution(v, &c)
 	return c
 }
 
@@ -97,6 +104,9 @@ func (c Config) validate() error {
 		return ErrConfig
 	}
 	if c.CacheTTL <= 0 || c.CacheTTL > 24*time.Hour {
+		return ErrConfig
+	}
+	if c.Threads < 0 || c.WarmupRuns < 0 || c.WarmupRuns > maximumWarmupRuns {
 		return ErrConfig
 	}
 	return errors.Join(c.validateMemory(), (onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}).Validate())

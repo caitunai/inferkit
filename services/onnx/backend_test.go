@@ -17,7 +17,7 @@ func TestBackendSelection(t *testing.T) {
 		if name == providerCoreML || name == providerAuto && runtime.GOOS == platformDarwin && runtime.GOARCH == "arm64" {
 			want = providerCoreML
 		}
-		if b.provider() != want {
+		if b.PreferredProvider() != want {
 			t.Fatal("wrong platform backend")
 		}
 	}

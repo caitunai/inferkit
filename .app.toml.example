@@ -138,7 +138,13 @@ keyring="/absolute/path/to/config-center-keys.json"
 # cpu 保持现有结果；auto 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。
 provider="cpu"
 coremlComputeUnits="ALL"
-# CPU threads, inference concurrency and request admission are automatic.
+# 0 or "auto": CPU uses a four-thread starting budget; CoreML keeps its small pool.
+# A positive value (e.g. 4) is capped at detected CPUs. Concurrency/admission remain automatic.
+threads="auto"
+# Complete at most ten warmup runs before serving; 0 disables startup warmup.
+warmupRuns=3
+# Uses the system user cache on macOS; independent of the HTTP result cache.
+coremlCache=true
 model="/path/to/artwork_fp32"
 # Defaults to true when db.database is configured. Apply Atlas migrations first.
 recordResults=true

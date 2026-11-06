@@ -11,12 +11,13 @@ import (
 )
 
 type engine struct {
-	provider string
-	lease    *onnx.Lease
-	session  *ort.DynamicAdvancedSession
-	slots    chan *tensorSlot
-	all      []*tensorSlot
-	runs     atomic.Uint64
+	provider    string
+	lease       *onnx.Lease
+	compilation *onnx.CompilationCache
+	session     *ort.DynamicAdvancedSession
+	slots       chan *tensorSlot
+	all         []*tensorSlot
+	runs        atomic.Uint64
 }
 
 type tensorSlot struct {
@@ -25,7 +26,7 @@ type tensorSlot struct {
 	options *ort.RunOptions
 }
 
-func newEngine(c Config, plan executionPlan, m *manifest, data []byte) (*engine, error) {
+func newEngine(ctx context.Context, c Config, plan executionPlan, m *manifest, data []byte) (*engine, error) {
 	lease, err := onnx.Acquire(c.Library)
 	if err != nil {
 		if errors.Is(err, onnx.ErrConfig) {
@@ -37,15 +38,15 @@ func newEngine(c Config, plan executionPlan, m *manifest, data []byte) (*engine,
 	if err = e.initialize(c, plan, m, data); err != nil {
 		return nil, errors.Join(err, e.close())
 	}
+	if err = e.warmup(ctx, c.WarmupRuns); err != nil {
+		return nil, errors.Join(err, e.close())
+	}
 	return e, nil
 }
 
 func (e *engine) initialize(c Config, plan executionPlan, m *manifest, data []byte) error {
-	backend := onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}
-	var err error
-	e.session, e.provider, err = backend.Create(data, []string{m.Input.Name}, []string{m.Output.Name}, func(options *ort.SessionOptions) error { return configureSession(options, plan) })
-	if err != nil {
-		return errors.Join(ErrRuntime, err)
+	if err := e.createSession(c, plan, m, data); err != nil {
+		return err
 	}
 
 	for range plan.concurrency {
@@ -93,6 +94,9 @@ func (e *engine) close() error {
 	var errs []error
 	if e.session != nil {
 		errs = append(errs, e.session.Destroy())
+	}
+	if e.compilation != nil {
+		errs = append(errs, e.compilation.Close())
 	}
 	for _, s := range e.all {
 		errs = append(errs, s.close())

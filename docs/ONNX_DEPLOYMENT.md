@@ -103,3 +103,30 @@ python -m unittest tests.test_export_classifier -v
 ```
 
 导出接口依据 [Ultralytics ONNX 官方文档](https://docs.ultralytics.com/integrations/onnx/)。本地只编写和静态审查代码，不执行 Python；ONNX 文件和数值校验报告需要按上述命令在服务器生成。
+
+## 图片检测启动与推理资源
+
+`image.filter` 支持以下设置，CLI 和 API 使用同一初始化流程：
+
+```toml
+[image.filter]
+threads="auto" # 也可使用 threads=4；整数 0 等同 auto。
+warmupRuns=3
+coremlCache=true
+```
+
+服务在模型验证、会话创建和有限预热全部成功后才启动 HTTP 监听。默认使用一张归一化白色画布预热共享会话 3 次，不读取用户图片、不填充结果缓存，也不占用请求推理次数。`warmupRuns` 范围为 0–10；0 关闭预热。预热总期限为 30 秒，并继承命令的取消信号；失败会清理会话、张量和运行库引用。ORT 原生会话创建接口本身是同步且不可取消的，此期限只约束预热阶段。日志分别记录 `session_create_ms`、`warmup_ms` 和 `warmup_runs`。
+
+CPU 自动线程预算为 `min(CPUs, max(4, (CPUs-1)/8+1))`；CoreML 自动预算保留最少 2 线程的原策略。正整数 `threads` 显式选择共享 ORT intra-op 线程数，并被有效 CPU 数限制；这不是启动多个模型会话。并发推理上限不超过 `CPUs-threads+1`，再按可用内存下调；内存不足不会反向扩大显式线程数。排队接纳继续自动计算，旧 `concurrency` 和 `maxRequests` 键不生效。例如 10 核且内存足够时，CPU 自动为 4 线程、7 个推理槽，CoreML 为 2 线程、9 个槽。若 CoreML 自动回退 CPU，保留该启动计划的资源上限；可使用 `provider="cpu"` 直接选择 CPU 自动计划。
+
+线程和并发应联合衡量。更多 intra-op 线程可以降低单请求延迟，也可能降低并发吞吐并与 libvips 争用 CPU；macOS ARM 的结果不能直接当作 Debian amd64 的最佳参数。用相同模型和图片比较完整 API 的吞吐及 P50/P95/P99。
+
+CoreML 编译缓存默认保存在 `os.UserCacheDir()/inferkit/onnx/coreml/<key>`，macOS 通常为 `~/Library/Caches/inferkit/onnx/coreml/`。缓存键包含实际模型字节 SHA256、ORT 版本、系统构建版本、CPU 型号、GOOS/GOARCH 及实际 EP 选项；换权重或更新运行环境会使用新目录，避免 ORT 的内存图名字缓存键复用旧权重。Linux CPU 不创建该缓存。
+
+编译缓存由 ONNX 包在会话初始化时维护：最多保留 8 个模型/环境目录，30 天未使用的非活跃目录优先删除；达到容量时淘汰最早使用的非活跃目录。根目录锁串行化维护，目录共享租约保护活跃会话，短期独占锁保护同模型编译；锁由操作系统在进程退出时释放。活跃目录不被淘汰，全部占用、锁冲突或权限不足时记录警告并无缓存启动，不扩大目录数量。同模型可在首次编译结束后被多个进程复用。编译期间另一个同模型进程会使用无缓存会话。
+
+原生缓存初始化失败会记录警告，先无缓存重试 CoreML；若原配置为 `auto` 且无缓存 CoreML 初始化仍失败，再回退 CPU。缓存文件由 ORT 管理，数量限制针对模型目录，不承诺固定字节占用。长期不停机的进程不会执行定时淘汰；清理发生在下次缓存获取时。可设置 `coremlCache=false` 回退，结果缓存设置 `bypassCache` 与它完全独立。
+
+预热主要改善首请求；编译缓存主要改善重启时会话创建。两者不改变模型 FP32 精度、libvips 预处理或输出协议，也不保证消除设备空闲后的延迟。上线对比应分别测量冷启动首请求、间隔请求和连续负载；输出校验失败、取消失效或既定延迟/吞吐目标退化时，回退对应设置。
+
+参考：[ONNX Runtime CoreML 编译缓存与失效要求](https://onnxruntime.ai/docs/execution-providers/CoreML-ExecutionProvider.html)、[线程池调优](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)。

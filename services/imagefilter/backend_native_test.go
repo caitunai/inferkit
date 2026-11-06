@@ -17,7 +17,22 @@ import (
 	ort "github.com/yalue/onnxruntime_go"
 )
 
-const coreMLProvider = "coreml"
+func TestNativeWarmupCancellationAndReuse(t *testing.T) {
+	c := nativeConfig(t)
+	c.WarmupRuns = 3
+	s := nativeServiceWithPlan(t, c, automaticPlan(c, resource.Detect()))
+	if s.engine.runs.Load() != 0 || len(s.engine.slots) != s.plan.concurrency {
+		t.Fatal("startup consumed request attempts or leaked slots")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := s.engine.warmup(ctx, 3); !errors.Is(err, context.Canceled) {
+		t.Fatalf("warmup cancellation lost: %v", err)
+	}
+	if _, err := s.Check(t.Context(), Source{Reader: bytes.NewReader(nativeImage(t, s))}); err != nil {
+		t.Fatalf("inference after warmup failed: %v", err)
+	}
+}
 
 func coreMLConfig(tb testing.TB) Config {
 	tb.Helper()

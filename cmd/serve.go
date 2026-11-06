@@ -33,7 +33,7 @@ var serveCmd = &cobra.Command{
 		var filter *imagefilter.Service
 		if viper.GetString("image.filter.model") != "" {
 			var initErr error
-			filter, initErr = imagefilter.New(imagefilter.Configuration(viper.GetViper()))
+			filter, initErr = imagefilter.NewContext(cmd.Context(), imagefilter.Configuration(viper.GetViper()))
 			if initErr != nil {
 				return errors.Join(ErrServeCommand, initErr)
 			}

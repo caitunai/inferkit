@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"math"
 	"slices"
 	"sync"
 	"time"
@@ -49,10 +48,22 @@ type Service struct {
 
 // New verifies the package and creates one reusable inference session.
 func New(c Config) (*Service, error) {
-	return newWithPlan(c, automaticPlan(c, resource.Detect()))
+	return NewContext(context.Background(), c)
+}
+
+// NewContext completes bounded startup warmup before publishing the service.
+func NewContext(ctx context.Context, c Config) (*Service, error) {
+	return newWithPlanContext(ctx, c, automaticPlan(c, resource.Detect()))
 }
 
 func newWithPlan(c Config, plan executionPlan) (*Service, error) {
+	return newWithPlanContext(context.Background(), c, plan)
+}
+
+func newWithPlanContext(ctx context.Context, c Config, plan executionPlan) (*Service, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(ErrRuntime, err)
+	}
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
@@ -63,7 +74,7 @@ func newWithPlan(c Config, plan executionPlan) (*Service, error) {
 	if err = validatePreprocessor(m); err != nil {
 		return nil, err
 	}
-	e, err := newEngine(c, plan, m, data)
+	e, err := newEngine(ctx, c, plan, m, data)
 	if err != nil {
 		return nil, err
 	}
@@ -245,19 +256,14 @@ func (s *Service) result(probabilities []float32) (Result, error) {
 	if len(probabilities) != len(s.labels) {
 		return Result{}, ErrInference
 	}
+	if err := validateProbabilities(probabilities); err != nil {
+		return Result{}, err
+	}
 	best := 0
-	sum := float64(0)
 	for i, p := range probabilities {
-		if math.IsNaN(float64(p)) || math.IsInf(float64(p), 0) || p < 0 || p > 1 {
-			return Result{}, ErrInference
-		}
-		sum += float64(p)
 		if p > probabilities[best] {
 			best = i
 		}
-	}
-	if math.Abs(sum-1) > 0.001 {
-		return Result{}, ErrInference
 	}
 	return Result{
 		Label: s.labels[best], ClassID: best, Confidence: probabilities[best],
