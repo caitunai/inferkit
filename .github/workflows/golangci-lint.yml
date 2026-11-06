@@ -14,12 +14,14 @@ permissions:
 jobs:
   golangci:
     name: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
-          go-version: stable
+          # Match Docker's Go minor version and use its latest security patch.
+          go-version: '1.27.x'
+          check-latest: true
           cache: false
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
@@ -27,7 +29,8 @@ jobs:
           # Require: The version of golangci-lint to use.
           # When `install-mode` is `binary` (default) the value can be v1.2 or v1.2.3 or `latest` to use the latest version.
           # When `install-mode` is `goinstall` the value can be v1.2.3, `latest`, or the hash of a commit.
-          version: v2.14
+          # Includes errcheck's errors.AsType support; align with local checks.
+          version: v2.15.0
 
           # Optional: working directory, useful for monorepos
           # working-directory: somedir

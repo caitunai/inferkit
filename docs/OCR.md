@@ -216,9 +216,9 @@ OCR_TEST_DIR=/absolute/path/to/ocr-models \
 
 `cpu-%` 以一个逻辑CPU为100%，10核进程的理论上限为1000%；Go分配不包含ONNX原生内存，4调用者的B/op对应整批4张图片。基准的内存源不包含外部URL下载延迟。应在目标服务器按实际图片、并发和容器额度复测，避免边构建/运行lint边做性能比较。优先验证文本、区域顺序、尺寸与坐标一致，再比较吞吐和尾延迟；置信度容许 1e-5 数值误差。
 
-### Debian 11
+### Debian 13
 
-执行器和资源探测覆盖 Linux/amd64，不依赖新内核专有 API；使用已有 Debian 11 构建脚本与匹配的 ONNX Runtime，不新增 Python、OpenCV 或外部 OCR 服务。cgroup v1/v2 解析有可复现的文件系统测试，纯 Go 资源探测包可交叉编译验证；这不等于已在 Debian 11 真机测得性能。部署步骤沿用 [Debian 11 文档](DEBIAN11_DEPLOYMENT.md)。
+执行器和资源探测覆盖 Linux/amd64；发布使用 Debian 13 Docker 镜像及匹配的 ONNX Runtime，不新增 Python、OpenCV 或外部 OCR 服务。cgroup v1/v2 解析保留文件系统测试，支持容器和父级资源配额；本机测量不代表 Debian 实机性能。部署步骤见 [Debian 13 Docker 文档](DOCKER_DEPLOYMENT.md)。
 
 在服务器上删除旧的三个执行配置，构建并重启后核对自动方案日志。若物理服务器启用了超线程或跨 NUMA 节点，更多线程也可能受内存带宽和调度影响，需用上述基准验证实际吞吐；CPU高占用本身不代表吞吐更好。
 

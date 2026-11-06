@@ -59,11 +59,11 @@ libvips 全局操作缓存关闭，单次原生解码使用 1 个工作线程；
 
 参考：[libvips buffer 加载的生命周期](https://www.libvips.org/API/current/ctor.Image.new_from_buffer.html)、[原生像素缓冲区的所有权](https://www.libvips.org/API/current/method.Image.write_to_memory.html)。
 
-## Debian 11 和 Docker（当前构建）
+## Debian 13 Docker（当前构建）
 
-当前构建默认启用 `vips` 和 Go 标准 SIMD。`scripts/prepare-image-linux.sh` 生成固定版本的私有 libvips/libheif/dav1d/Highway，JPEG 依赖 Debian libjpeg62-turbo，不替换系统库。Debian 11 构建入口仍为 `bash scripts/build-debian11.sh`，完整依赖、运行库路径和验收步骤见 [当前模型说明](LIBVIPS_MODEL_PIPELINE.md)。Docker 的 `WITH_VIPS` 默认已改为 true。
+当前构建默认启用 `vips` 和 Go 标准 SIMD。`scripts/prepare-image-linux.sh` 生成固定版本的私有 libvips/libheif/dav1d/Highway，JPEG 依赖 Debian libjpeg62-turbo，不替换系统库。发布入口为 [Debian 13 Docker 构建与部署](DOCKER_DEPLOYMENT.md)，完整依赖、运行库路径和验收步骤见 [当前模型说明](LIBVIPS_MODEL_PIPELINE.md)。Docker 的 `WITH_VIPS` 默认已改为 true。
 
-本机没有 Docker/Linux 执行环境；Debian 11 构建与 ABI 检查已接入 CI，不把 macOS 数据当作服务器实测。
+本机没有 Docker/Linux 执行环境；CI 在 Debian 13 镜像内检查原生依赖、图片预处理和真实 small OCR，不把 macOS 数据当作服务器实测。Debian 11 专项构建和 ABI 检查已移除。
 
 ## 旧模型的历史测量
 
@@ -80,7 +80,7 @@ M2 Pro / macOS ARM64 / 10 CPU / 32 GiB / Go 1.27.3 / ONNX Runtime 1.31.1 / libvi
 | 最终 CPU + Go PNG + SIMD | 8 | 71.98ms | 79.80 / 95.62ms | 103.8 |
 | 最终 CoreML + Go PNG + SIMD | 8 | 38.37ms | 51.44 / 53.75ms | 157.0 |
 
-CoreML 组合的单请求 P50 下降约 53%，8 并发吞吐提高约 50%；进程 CPU 从单请求约 207% / 8 并发 822%，变为约 175% / 436%（不包括 GPU/ANE 时间，单逻辑核为 100%）。CPU 方案下 PNG 总体收益很小且尾延迟有波动，不能用 SIMD 微基准推断整个 CPU 接口同比例提速。Debian 11、真实图片分布和 OCR 混合负载尚需部署后复测。
+CoreML 组合的单请求 P50 下降约 53%，8 并发吞吐提高约 50%；进程 CPU 从单请求约 207% / 8 并发 822%，变为约 175% / 436%（不包括 GPU/ANE 时间，单逻辑核为 100%）。CPU 方案下 PNG 总体收益很小且尾延迟有波动，不能用 SIMD 微基准推断整个 CPU 接口同比例提速。Linux 服务器、真实图片分布和 OCR 混合负载尚需部署后复测。
 
 独立阶段微基准（JPEG/WebP 为同一份 1070×680 合成图片编码生成的输入，两个解码器读取完全相同的字节；每项 500ms）：
 
@@ -92,7 +92,7 @@ CoreML 组合的单请求 P50 下降约 53%，8 并发吞吐提高约 50%；进�
 
 JPEG/WebP 的 Go 分配分别约为 1.13/1.22MB，原生路径约为 2.92MB，因为它直接返回完整 RGBA，而 Go JPEG/WebP 使用较紧凑的色度平面；这些数字不包括 C 分配，因此准入预算额外保留原生内存。SIMD 张量转换两侧均无分配，并通过全部通道/透明度值、不同宽度、行步长和尾部像素的逐值对照。
 
-最终默认/vips 构建均通过完整 lint、dupl 和 `go test ./...`；纯 Go 回退测试通过。真实分类、CoreML 并发/取消/自动回退、PP-OCRv6 medium、HTTP 日志及共享运行时均通过原生 race 检查。PNG 模糊对照约 35 万次执行无失败。Debian 构建脚本的 12 项检查通过，其中官方离线归档测试因未配置归档而跳过；本机未执行 Debian 11 真机或 Docker 构建。
+最终默认/vips 构建均通过完整 lint、dupl 和 `go test ./...`；纯 Go 回退测试通过。真实分类、CoreML 并发/取消/自动回退、PP-OCRv6 medium、HTTP 日志及共享运行时均通过原生 race 检查。PNG 模糊对照约 35 万次执行无失败。Debian 构建脚本的 12 项检查通过，其中官方离线归档测试因未配置归档而跳过；本机未执行 Linux 真机或 Docker 构建；此处测试计数是当时的历史记录。
 
 ## 复测
 

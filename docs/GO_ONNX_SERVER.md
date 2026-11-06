@@ -13,8 +13,6 @@
 
 ## 安装与配置
 
-Debian 11 x86_64 直接运行二进制的构建、ONNX Runtime 固定版本下载、系统 ABI 检查及 systemd 配置见 [Debian 11 原生部署](DEBIAN11_DEPLOYMENT.md)。应在 Debian 11 上启用 CGO 构建，避免引入较新系统的 glibc 依赖。
-
 需要直接拉取运行环境时，使用 [Debian 13 amd64 Docker 镜像](DOCKER_DEPLOYMENT.md)：GitHub Actions 构建、测试后发布到 GHCR，并可同时发布到 Docker Hub，部署时只需挂载配置和模型目录。
 
 使用项目 `go.mod` 指定的 Go 1.27、C 编译器、`CGO_ENABLED=1`、`-tags vips` 构建；推荐 `GOEXPERIMENT=simd` 启用标准库张量内核。libvips 版本必须与模型清单相同，本模型为 8.18.7；AVIF 需要带 dav1d 的 libheif 1.23+。Go 绑定固定为 `github.com/yalue/onnxruntime_go v1.38.0`，需部署与其 C API 兼容、匹配操作系统及 CPU 架构的原生 ONNX Runtime 动态库。本机使用 ONNX Runtime 1.31.1 完成验收。macOS Homebrew 标准安装路径会自动检测；其他安装方式在配置中显式指定库文件。Linux 默认加载 `libonnxruntime.so`，Windows 默认加载 `onnxruntime.dll`。
@@ -184,7 +182,7 @@ IMAGE_FILTER_BYPASSCACHE=true ./inferkit --config .app.toml serve
 
 `image.filter.concurrency` 和 `image.filter.maxRequests` 不再生效。`image.filter.threads` 支持 `"auto"`、整数 0（均表示自动），或如 4 的正整数；线程数与并发容量共同预算，而非独立上限。启动时记录 `image filter automatic resource plan`，输出 `cpus`、`memory_bytes`、`threads`、`image_concurrency`、`max_requests`，以及部署模型的 `model_sha256` 和实际加载的 `onnxruntime_version`。模型指纹用于核对基准与部署资产，不是图片内容哈希。
 
-启动时调用与 OCR 共用的 `services/resource`：CPU 取可用逻辑 CPU、`GOMAXPROCS` 和 Linux cgroup v1/v2 层级配额的较小值；macOS 读取物理内存，Linux 结合物理内存与 cgroup 内存限额，并保守考虑 `GOMEMLIMIT`。探测失败采用 512 MiB 内存预算。Debian 11 的 v1/v2、自定义挂载点和父级限额沿用已有资源探测，不增加平台依赖。更改容器资源、CPU affinity 或 `GOMAXPROCS` 后需重启，重新建立原生线程池和处理位。
+启动时调用与 OCR 共用的 `services/resource`：CPU 取可用逻辑 CPU、`GOMAXPROCS` 和 Linux cgroup v1/v2 层级配额的较小值；macOS 读取物理内存，Linux 结合物理内存与 cgroup 内存限额，并保守考虑 `GOMEMLIMIT`。探测失败采用 512 MiB 内存预算。Linux cgroup v1/v2、自定义挂载点和父级限额沿用已有资源探测，不增加平台依赖。更改容器资源、CPU affinity 或 `GOMAXPROCS` 后需重启，重新建立原生线程池和处理位。
 
 容量计算为：
 
@@ -265,7 +263,7 @@ HTTP 有界准入 → 解析有界上传 / URL
 
 PNG 的尺寸和色彩头继续由标准库验证，完整像素解码使用固定版本 [github.com/woozymasta/png v1.2.0](https://github.com/WoozyMasta/png)：它基于 Go 标准 PNG 解码器，采用已有的 klauspost zlib 和像素处理优化，amd64 SIMD 按 CPU 能力选择，arm64/其他架构有纯 Go 路径。不增加 C 库、WASM 或 Python；JPEG、WebP、AVIF 继续使用原有后端。像素和单边尺寸限制在分配像素前生效，仍验证 PNG 数据校验和并处理原有 EXIF 方向。共享图片输入层使 OCR 同样受益。
 
-已与本机 Go 标准 PNG 测试语料逐字节比对，包括调色板、隔行和高位深图像，检查错误输入、CRC 和大小限制，并提供有界模糊对照。1070×680 合成 RGB PNG 的本机微基准从约 5.62ms 降为 5.00ms，分配次数从 532 降为 42；真实收益取决于 PNG 数据及 CPU，不能直接套用到其他编码格式。BSD 许可随 Docker 和 Debian 11 构建包的 notices 一并分发。
+已与本机 Go 标准 PNG 测试语料逐字节比对，包括调色板、隔行和高位深图像，检查错误输入、CRC 和大小限制，并提供有界模糊对照。1070×680 合成 RGB PNG 的本机微基准从约 5.62ms 降为 5.00ms，分配次数从 532 降为 42；真实收益取决于 PNG 数据及 CPU，不能直接套用到其他编码格式。BSD 许可随 Docker 镜像的 notices 一并分发。
 
 ## 颜色转换与首次请求
 
@@ -315,7 +313,7 @@ NRGBA 工作缓冲区保持独立所有权。不透明 `image.RGBA` 可直接按
 
 单请求 P50 下降约 29%，8 并发吞吐提高约 6%。最初 50 批并发样本中本轮 P95/P99 为 88.17/99.15ms，高于基线 83.22/85.55ms；因此扩大样本并交换执行顺序复测，得到上表，仍需用部署机持续压测确认尾延迟。8 并发进程 CPU 约从 805% 到 815%（单核为 100%）。不含模型加载、HTTP 上传、URL 网络或数据库操作。独立线程策略复测中，50ms 空闲窗口消耗进程 CPU 约 0.053ms（停放）和 0.094ms（有界自旋），没有观察到空闲持续忙等；短窗口只验证本次运行。
 
-预处理阶段还保留 `convert_ms` 与 `tensor_ms` 两个子项，`resize_ms` 已包含在 `preprocess_ms` 内，不重复加总。原图未知时不能保证日志中的 26.6ms 解码或 18.6ms 缩放按同样比例下降；高并发下借到的行预算也会减少。完整请求以及目标 Debian 11 的实际表现应按下面基准和实际 API 日志分别复测。
+预处理阶段还保留 `convert_ms` 与 `tensor_ms` 两个子项，`resize_ms` 已包含在 `preprocess_ms` 内，不重复加总。原图未知时不能保证日志中的 26.6ms 解码或 18.6ms 缩放按同样比例下降；高并发下借到的行预算也会减少。完整请求以及目标 Linux 服务器的实际表现应按下面基准和实际 API 日志分别复测。
 
 ## 验证与性能复现
 
@@ -384,6 +382,6 @@ npm run build
 
 同尺寸大图的单请求 P50 降低约 31%，8 并发吞吐提高约 13%；小图单请求 P50 降低约 39%，8 并发吞吐提高约 7%。8 并发大图平均进程 CPU 由 731.3% 变为 796.9%，小图由 689.6% 变为 817.9%（一个逻辑 CPU 为 100%）。Go 分配没有明显下降，8 调用者的 `B/op` 对应整批图片，且不包含 ONNX 原生内存。
 
-线程候选对照也包含 1、2、3、4 和全部 CPU 的算子线程数。该机器上满核算子线程对单图的额外收益有限，却挤占处理位、降低 8 并发吞吐，因此采用小型共享算子池。分位数仅描述本次样本；合成大图没有复现用户原图的内容、格式或完整 111.79ms 请求，不能承诺用户原图会降到表中的耗时。尚未在 Debian 11 真机测量，部署机应使用真实图片、CPU/内存额度及 OCR 混合负载复测。
+线程候选对照也包含 1、2、3、4 和全部 CPU 的算子线程数。该机器上满核算子线程对单图的额外收益有限，却挤占处理位、降低 8 并发吞吐，因此采用小型共享算子池。分位数仅描述本次样本；合成大图没有复现用户原图的内容、格式或完整 111.79ms 请求，不能承诺用户原图会降到表中的耗时。尚未在 Debian 13 真机测量，部署机应使用真实图片、CPU/内存额度及 OCR 混合负载复测。
 
 原生运行时及线程参数参考：[Go 绑定说明](https://github.com/yalue/onnxruntime_go)、[ONNX Runtime CPU 线程管理](https://onnxruntime.ai/docs/performance/tune-performance/threading.html)。

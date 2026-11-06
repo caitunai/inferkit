@@ -74,7 +74,7 @@ bypassCache=true # 性能对照时使用。
 
 `auto` 在 macOS ARM 尝试 CoreML，在 Linux 使用 CPU；推理执行器不负责图片处理。模型位置、输入限制、超时和缓存仍使用现有配置。
 
-## Debian 11 及以上
+## Debian 13 Docker
 
 原生依赖通过 `scripts/prepare-image-linux.sh` 构建到私有前缀，不替换系统库。固定来源及 SHA-256 均在脚本中：
 
@@ -96,25 +96,22 @@ sudo apt-get install -y --no-install-recommends \
   libexif-dev liblcms2-dev zlib1g-dev
 ```
 
-在 Debian 11 x86_64 构建完整发布包：
+当前 Linux 发布使用 Debian 13 amd64 镜像，不再提供 Debian 11 原生发布包或 ABI 基线检查：
 
 ```bash
-bash scripts/build-debian11.sh
-# 也可离线提供上述四个固定源码归档，摘要仍会校验：
-INFERKIT_IMAGE_SOURCE_DIR=/absolute/path/native-source-archives \
-  bash scripts/build-debian11.sh /srv/builds/inferkit-new
+docker buildx build --pull --platform linux/amd64 --load -t inferkit:debian13 .
+python3 scripts/test-inference-image.py inferkit:debian13
 ```
 
-默认启用原生流水线及 Go SIMD。包中增加 `image/lib/`、原生依赖版本和许可说明、`runtime-packages.txt`；复制整个发布包后安装该文件列出的系统运行依赖。systemd 模板已加入 `/opt/inferkit/image/lib` 和 ONNX Runtime 库目录。手动执行时同样设置：
+Docker 默认 `WITH_VIPS=true`，从固定源码构建上述原生库，安装 Debian libjpeg62-turbo 运行依赖，最后将 `/opt/inferkit-image` 和 ONNX Runtime 库复制到运行镜像。`LD_LIBRARY_PATH` 已配置，版本记录和许可证随原生前缀交付。构建中的非 root 运行阶段会验收四格式、AVIF 高位深、缩小解码与 OCR 内核，发布前再用外部挂载的 small 模型进行真实识别。详见 [Docker 部署](DOCKER_DEPLOYMENT.md)。
+
+需要离线准备原生库时，仍可在 Debian 13 x86_64 的构建环境中复用共享脚本，提供上述四个固定源码归档，摘要校验保持启用：
 
 ```bash
-export LD_LIBRARY_PATH=/opt/inferkit/image/lib:/opt/inferkit/onnxruntime/lib
-/opt/inferkit/inferkit --config /etc/inferkit/app.toml image-filter validate
+bash scripts/prepare-image-linux.sh /opt/inferkit-image /absolute/path/native-source-archives
 ```
 
-程序和全部私有动态库均纳入 Debian 11 ABI 检查。Debian 11 系统自带的旧 libvips/libheif 不能直接替代这个与模型配套的包。在更新系统构建出的二进制也不能直接当作 Debian 11 ABI 产物。
-
-Docker 默认 `WITH_VIPS=true`，同样从固定源码构建上述原生库，并安装 Debian libjpeg62-turbo 运行依赖。`WITH_VIPS=false` / `INFERKIT_WITH_VIPS=0` 构建供不加载此分类模型的其他功能使用；双后端分类服务需要带 libvips 的构建。
+`WITH_VIPS=false` 仅供不加载此分类模型的其他功能使用；双后端分类服务需要带 libvips 的构建。不要用系统中其他版本的 libvips/libheif 替换与模型配套的私有库。
 
 ## SIMD、资源及观测
 
@@ -175,4 +172,4 @@ JPEG 成功构建 loader 时，还输出：
 
 首版在 libvips 内复制画布、拆分三个 band 再拼接平面，造成额外开销；已移除。当前直接返回 RGB，与训练函数 write_to_memory 的边界相同，再由 Go SIMD 打包张量。原始表和资源统计保留于忽略提交的 `tmp/vips-full-pipeline/`。
 
-本机没有 Linux/Docker 执行环境；amd64 Go SIMD 内核已交叉编译，更新后的 CI 已配置 Debian 11 完整原生构建及 ABI/运行测试，但本次没有触发 CI，也未在本机执行 Linux 构建。上述速度不是未来服务器或浏览器端到端延迟承诺。
+本机没有 Linux/Docker 执行环境；amd64 Go SIMD 内核已交叉编译，当前 CI 已改为 Debian 13 镜像的原生运行测试和真实 small OCR 验收，但本次没有触发 CI，也未在本机执行 Linux 构建。上述速度不是未来服务器或浏览器端到端延迟承诺。

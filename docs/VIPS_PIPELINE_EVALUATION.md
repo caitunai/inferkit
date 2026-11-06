@@ -1,5 +1,7 @@
 # libvips 完整图片处理链评估
 
+本文是此前的原型分析记录；当前部署以 [Debian 13 Docker 文档](DOCKER_DEPLOYMENT.md) 为准，Debian 11 专项构建与 ABI 兼容检查已移除。
+
 2026-11-05，使用 `tmp/images/test.{png,jpeg,webp,avif}` 四张原图，只读输入。结论是：**有进一步提速空间，但不宜把四种格式一律切换到 libvips。** 本轮完成本机原型测量，没有更换 API/CLI 的默认预处理，也没有修改模型、配置或正在运行的服务。
 
 ## 请求流程和验证范围
@@ -97,7 +99,7 @@ WebP 的重点是 **解码时缩小**，单纯用 vips resize 替换 Go resize �
 5. 显式处理 EXIF、AVIF clap/irot/imir、ICC/高位深、透明度预乘/反预乘和白底顺序。`vips_resize` 不自动预乘 alpha；直接用于透明 RGBA 会产生另一种结果。
 6. OCR 与分类的输入尺寸和几何需求不同，不应把分类用的 320 像素缩略图接入共享解码器。OCR 要分别测文字检测、裁切和识别，不能从本次分类结果推断 OCR 精度。
 
-Debian 11 的官方 `libvips42` 为 8.10.5 系列，`libheif1` 为 1.11.0 系列，依赖 libjpeg62-turbo 和 libdav1d4；与本机原生库版本不同。未来 amd64 无 GPU 部署继续使用 ONNX Runtime CPU 和原有 CPU SIMD，不需要 CoreML。原生图片链是否更快，仍应在实际 Debian 11 构建、实际 CPU 和请求并发上验证，不能复制本机的结论或新版本 API。
+Debian 11 的官方 `libvips42` 为 8.10.5 系列，`libheif1` 为 1.11.0 系列，依赖 libjpeg62-turbo 和 libdav1d4；与本机原生库版本不同。未来 amd64 无 GPU 部署继续使用 ONNX Runtime CPU 和原有 CPU SIMD，不需要 CoreML。原生图片链是否更快，仍应在当前目标 Linux 构建、实际 CPU 和请求并发上验证，不能复制本机的结论或新版本 API。
 
 ## 本地复现与产物
 

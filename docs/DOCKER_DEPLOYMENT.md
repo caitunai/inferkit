@@ -5,15 +5,17 @@
 
 镜像基于官方 `debian:trixie-slim`（Debian 13），仅支持 `linux/amd64`。每次 Actions 构建会拉取最新基础镜像，跟进 Debian 13 的点版本；不使用可能在未来切换到 Debian 14 的 `debian:latest`。
 
-Debian 13 是容器内的运行环境，宿主机可以继续使用 Debian 11；原生库使用容器内的 glibc，而非宿主机 glibc。宿主机需具备可用的 amd64 Docker Engine 和相应内核支持。
+Debian 13 是当前容器运行环境；原生库使用容器内的 glibc。宿主机需具备可用的 amd64 Docker Engine 和相应内核支持。Debian 11 专用构建、ABI 基线检查及 systemd 发布包已移除。
 
-前端由 Node 24 构建，随后嵌入 Go 二进制；Go 使用 `golang:1.27-trixie`、CGO 和 `GOAMD64=v1` 编译。镜像包含固定的 ONNX Runtime CPU 1.31.1 及其系统依赖，复用 Debian 11 部署的官方包下载与 SHA-256 校验，以及共享的 C API 版本核对脚本。业务推理继续仅使用 CPU。默认启用 `WITH_VIPS=true` 及 Go 标准 SIMD，并在私有前缀构建固定的 libvips 8.18.7、libheif 1.23.7、dav1d 1.5.4、Highway 1.4.0；JPEG 使用 Debian libjpeg62-turbo。
+前端由 Node 24 构建，随后嵌入 Go 二进制；Go 使用 `golang:1.27-trixie`、CGO 和 `GOAMD64=v1` 编译。镜像包含固定的 ONNX Runtime CPU 1.31.1 及其系统依赖，通过共享脚本下载官方包、校验 SHA-256 并核对 C API 版本。业务推理继续仅使用 CPU。默认启用 `WITH_VIPS=true` 及 Go 标准 SIMD，并在私有前缀构建固定的 libvips 8.18.7、libheif 1.23.7、dav1d 1.5.4、Highway 1.4.0；JPEG 使用 Debian libjpeg62-turbo。
 
 配置、训练模型、密钥和数据库内容通过外部配置或挂载提供。`.dockerignore` 使用构建输入白名单，排除 `.git`、本机 `.app.toml` / `.env`、模型权重、私钥、依赖目录和已有构建产物，避免它们进入镜像或 CI 构建缓存。
 
 ## GitHub Actions 构建和发布
 
-工作流文件为 `.github/workflows/docker.yml`，名称是 **Debian 13 amd64 image**：
+工作流文件为 `.github/workflows/docker.yml`，名称是 **Debian 13 amd64 image**。构建和 lint 的 runner 均固定为 `ubuntu-24.04`，不跟随 `ubuntu-latest` 迁移；Docker 内仍使用 Debian 13。lint 使用 Go `1.27.x` 和 golangci-lint `v2.15.0`，与本机验证版本对齐。旧版 errcheck 会误判 `errors.AsType` 返回的匹配值，新版本已修正，不需要修改错误处理或放宽 lint 规则。[errcheck 的 AsType 支持](https://github.com/kisielk/errcheck/blob/v1.30.0/errcheck/errcheck.go#L399)
+
+发布触发规则：
 
 - 推送 `main` / `master`、推送 `v*` 标签时构建并发布；仓库默认分支更新 `latest`，版本标签生成同名镜像标签。
 - 默认分支同时更新 `debian13` 标签，版本标签另外生成 `vX.Y.Z-debian13`；每次发布仍生成 `sha-<完整提交 SHA>`。

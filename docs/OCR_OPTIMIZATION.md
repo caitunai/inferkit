@@ -85,7 +85,7 @@ bash scripts/prepare-ocr-models.sh --size small models/pp-ocrv6-small
 
 本机原始对照保存在忽略目录 `tmp/ocr-analysis-20261106/`；本轮原始日志、分配与启动结果、汇总 JSON、CLI 测试和检查日志在 `tmp/ocr-optimization-20261106/`。测试图与识别内容仅保存在本地。
 
-Debian 11/amd64 无 GPU 时使用 CPU；Go SIMD 在支持的 amd64 CPU 上检查 AVX，未启用实验或不支持则标量回退。上述性能数字来自 M2 Pro，尚无 Debian 真机性能结论。切换模型/provider/批次后需用业务标注集及目标并发重新确认吞吐、质量与内存。
+Debian 13/amd64 无 GPU 时使用 CPU；Go SIMD 在支持的 amd64 CPU 上检查 AVX，未启用实验或不支持则标量回退。上述性能数字来自 M2 Pro，尚无 Debian 真机性能结论。切换模型/provider/批次后需用业务标注集及目标并发重新确认吞吐、质量与内存。
 
 ## 验证
 

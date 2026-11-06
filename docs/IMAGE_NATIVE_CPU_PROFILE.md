@@ -79,7 +79,7 @@ eval 内重采样占 **51.07%** 的 CPU 样本；JPEG 熵解码/系数约 22.34%
 
 这里未做解码缩小符合当前 libvips thumbnail 的默认选择：1070/320≈3.34，尚未达到其选择 1/2 解码缩小的阈值。不能将 shrink=1 视为配置失效。独立计时记录在 `tmp/native-test-jpeg-confirm/native-timings.json`。
 
-本次未改变生产默认参数，也未切换 JPEG 库或模型。没有 Linux/debian11 实测数据；未来 libjpeg-turbo 的函数占比应在服务器独立采样。
+本次未改变生产默认参数，也未切换 JPEG 库或模型。没有 Linux 实测数据；未来 libjpeg-turbo 的函数占比应在服务器独立采样。
 
 ## 复跑和检查
 

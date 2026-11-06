@@ -8,7 +8,6 @@ The project template of Golang.
 - [Go CPU 部署、CLI 和浏览器检测工作台](docs/GO_ONNX_SERVER.md)
 - [新模型的完整 libvips 预处理与 Go SIMD 部署](docs/LIBVIPS_MODEL_PIPELINE.md)
 - [libvips 与 Go archsimd 图片处理后端切换及生产对比](docs/IMAGE_PREPROCESS_BACKENDS.md)
-- [Debian 11 x86_64 原生 CPU 部署与 ONNX Runtime 兼容检查](docs/DEBIAN11_DEPLOYMENT.md)
 - [Debian 13 amd64 Docker 镜像、GitHub Actions 与 GHCR / Docker Hub 部署](docs/DOCKER_DEPLOYMENT.md)
 - [ONNX 模型部署协议](docs/ONNX_DEPLOYMENT.md)
 

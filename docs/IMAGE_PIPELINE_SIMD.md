@@ -115,4 +115,4 @@ IMAGE_FILTER_TEST_IMAGES="$PWD/tmp/images" \
 
 无 libvips 的构建可去掉 `vips` 标签，稳定 SIMD 仍可使用。`purego` 只控制相应包的内核，不代表 ONNX 或全部第三方解码器不再使用原生库/汇编。Go SIMD 实验路径当前只在 ARM64 实现；amd64 稳定路径使用 SSE2，CPU 推理由 ONNX Runtime 管理。
 
-默认、libvips、Go SIMD 实验均通过全仓库 lint、dupl 与测试；purego 回退测试通过。四张原图逐值张量对照、负系数、上下采样、极窄/长图、透明度和 32 位溢出回退均验证；稳定和实验路径均通过真实模型、并发、取消和 race 检查。amd64 SSE2 内核已交叉编译语法检查，实际 Debian 11 性能需在服务器上测量；现有 CI 会在 Debian 11 执行内核测试。
+默认、libvips、Go SIMD 实验均通过全仓库 lint、dupl 与测试；purego 回退测试通过。四张原图逐值张量对照、负系数、上下采样、极窄/长图、透明度和 32 位溢出回退均验证；稳定和实验路径均通过真实模型、并发、取消和 race 检查。amd64 SSE2 内核已交叉编译语法检查，实际 Linux amd64 性能需在服务器上测量；当前 CI 通过 Debian 13 镜像的原生测试和真实 OCR 进行验收。
