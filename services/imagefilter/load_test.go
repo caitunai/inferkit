@@ -45,7 +45,11 @@ func benchmarkFilterLoad(b *testing.B, service *Service, callers int) {
 	benchmarkFilterImages(b, service, images, callers)
 }
 
-func benchmarkFilterImages(b *testing.B, service *Service, images [][]byte, callers int) {
+type imageDetector interface {
+	Check(context.Context, Source) (Result, error)
+}
+
+func benchmarkFilterImages(b *testing.B, service imageDetector, images [][]byte, callers int) {
 	b.Helper()
 	for _, data := range images {
 		if _, err := service.Check(b.Context(), Source{Reader: bytes.NewReader(data)}); err != nil {
@@ -91,7 +95,7 @@ func BenchmarkFilterSizedLoad(b *testing.B) {
 	}
 }
 
-func filterLoad(ctx context.Context, service *Service, images [][]byte, callers int) ([]time.Duration, error) {
+func filterLoad(ctx context.Context, service imageDetector, images [][]byte, callers int) ([]time.Duration, error) {
 	times := make([]time.Duration, callers)
 	group := xutil.ErrGroup(ctx, "image_filter_load_test").Limit(callers)
 	for i := range callers {
@@ -99,7 +103,10 @@ func filterLoad(ctx context.Context, service *Service, images [][]byte, callers 
 			start := time.Now()
 			_, err := service.Check(ctx, Source{Reader: bytes.NewReader(images[i%len(images)])})
 			times[i] = time.Since(start)
-			return err
+			if err != nil {
+				return errors.Join(ErrInference, err)
+			}
+			return nil
 		})
 	}
 	if err := group.Wait(); err != nil {

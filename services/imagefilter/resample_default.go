@@ -1,4 +1,4 @@
-//go:build purego || ((!cgo || (!arm64 && !amd64)) && (!goexperiment.simd || !arm64))
+//go:build !goexperiment.simd || (!arm64 && !amd64) || purego
 
 package imagefilter
 

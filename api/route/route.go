@@ -69,7 +69,10 @@ func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.Ima
 		if records != nil && collect {
 			recorder = records
 		}
-		api.POST("/image/filter", handler.FilterImage(filter, recorder))
+		native, goBackend := handler.FilterImageBackends(filter, recorder)
+		api.POST("/image/filter", native)
+		api.POST("/image/filter/libvips", native)
+		api.POST("/image/filter/go", goBackend)
 	}
 
 	if recognizer != nil {

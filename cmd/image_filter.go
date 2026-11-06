@@ -23,7 +23,10 @@ var imageFilterCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(imageFilterCmd)
-	imageFilterCmd.AddCommand(&cobra.Command{Use: "validate", Short: "Compare exported tensors and images with validation.json", Args: cobra.NoArgs, RunE: validateImageFilter})
+	imageFilterCmd.Flags().String("preprocess", string(imagefilter.Libvips), "Image preprocessing backend: libvips or go")
+	validate := &cobra.Command{Use: "validate", Short: "Compare exported tensors and images with validation.json", Args: cobra.NoArgs, RunE: validateImageFilter}
+	validate.Flags().String("preprocess", string(imagefilter.Libvips), "Image preprocessing backend: libvips or go")
+	imageFilterCmd.AddCommand(validate)
 	imageFilterCmd.AddCommand(&cobra.Command{
 		Use: "serve", Short: "Start the image API without Redis or queue initialization", Args: cobra.NoArgs,
 		PreRunE: func(_ *cobra.Command, _ []string) error { return validateConfigCenterSettings() }, RunE: serveImageFilter,
@@ -42,8 +45,8 @@ func serveImageFilter(cmd *cobra.Command, _ []string) error {
 }
 
 func validateImageFilter(cmd *cobra.Command, _ []string) error {
-	return withImageFilter(func(service *imagefilter.Service) error {
-		results, validationErr := service.Validate(cmd.Context())
+	return withImageDetector(cmd, func(detector imagefilter.Detector) error {
+		results, validationErr := detector.Validate(cmd.Context())
 		if err := json.MarshalWrite(cmd.OutOrStdout(), results); err != nil {
 			return errors.Join(ErrImageFilterCommand, err)
 		}
@@ -64,9 +67,19 @@ func withImageFilter(run func(*imagefilter.Service) error) (returnErr error) {
 }
 
 func runImageFilter(cmd *cobra.Command, args []string) error {
-	return withImageFilter(func(service *imagefilter.Service) error { return writeImageResults(cmd, service, args) })
+	return withImageDetector(cmd, func(detector imagefilter.Detector) error {
+		return writeSourceResults(cmd, args, ErrImageFilterCommand, detector.Check)
+	})
 }
 
-func writeImageResults(cmd *cobra.Command, service *imagefilter.Service, args []string) error {
-	return writeSourceResults(cmd, args, ErrImageFilterCommand, service.Check)
+func withImageDetector(cmd *cobra.Command, run func(imagefilter.Detector) error) error {
+	value, err := cmd.Flags().GetString("preprocess")
+	if err != nil {
+		return errors.Join(ErrImageFilterCommand, err)
+	}
+	backend, err := imagefilter.ParseBackend(value)
+	if err != nil {
+		return errors.Join(ErrImageFilterCommand, err)
+	}
+	return withImageFilter(func(service *imagefilter.Service) error { return run(service.WithBackend(backend)) })
 }

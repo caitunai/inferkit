@@ -60,25 +60,49 @@ func exifOrientation(data []byte, format string) uint16 {
 }
 
 func jpegEXIF(data []byte) []byte {
-	for offset := 2; offset+4 <= len(data); {
-		if data[offset] != 0xff {
+	for offset := 2; offset < len(data); {
+		marker, segment, next := jpegSegment(data, offset)
+		if next == 0 {
 			return nil
 		}
-		marker := data[offset+1]
-		if jpegTerminal(marker) {
-			return nil
-		}
-		length := int(binary.BigEndian.Uint16(data[offset+2:]))
-		if length < 2 || length > len(data)-offset-2 {
-			return nil
-		}
-		segment := data[offset+4 : offset+2+length]
 		if jpegEXIFSegment(marker, segment) {
 			return segment
 		}
-		offset += length + 2
+		offset = next
 	}
 	return nil
+}
+
+// jpegSegment skips marker padding and standalone markers, and never traverses
+// entropy-coded scan data. A zero next offset marks the end or corrupt input.
+func jpegSegment(data []byte, offset int) (byte, []byte, int) {
+	const prefix = 0xff
+	if offset >= len(data) || data[offset] != prefix {
+		return 0, nil, 0
+	}
+	for offset < len(data) && data[offset] == prefix {
+		offset++
+	}
+	if offset >= len(data) || jpegTerminal(data[offset]) {
+		return 0, nil, 0
+	}
+	marker := data[offset]
+	offset++
+	if marker == 1 || marker >= 0xd0 && marker <= 0xd8 {
+		return marker, nil, offset
+	}
+	return jpegPayload(data, offset, marker)
+}
+
+func jpegPayload(data []byte, offset int, marker byte) (byte, []byte, int) {
+	if offset+2 > len(data) {
+		return 0, nil, 0
+	}
+	size := int(binary.BigEndian.Uint16(data[offset:]))
+	if size < 2 || size > len(data)-offset {
+		return 0, nil, 0
+	}
+	return marker, data[offset+2 : offset+size], offset + size
 }
 
 func jpegTerminal(marker byte) bool { return marker == 0xda || marker == 0xd9 }

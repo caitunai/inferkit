@@ -11,7 +11,6 @@ import (
 )
 
 const (
-	backendSIMD = "simd"
 	backendGo   = "go"
 	imageSize   = 320
 	channels    = 3

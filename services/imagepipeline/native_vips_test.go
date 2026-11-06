@@ -10,8 +10,10 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -63,6 +65,7 @@ func assertNativeFormat(t *testing.T, format string) {
 		t.Fatal(err)
 	}
 	defer pixels.Close()
+	assertNativeDiagnostics(t, pixels.Diagnostics)
 	if pixels.Header.Format != format || pixels.Header.Width != 48 || pixels.Header.Height != 32 || len(pixels.Data) != 320*320*3 {
 		t.Fatalf("invalid metadata: %+v", pixels.Header)
 	}
@@ -73,6 +76,53 @@ func assertNativeFormat(t *testing.T, format string) {
 	if pixels.Data != nil {
 		t.Fatal("close retained borrowed native memory")
 	}
+}
+
+func assertNativeDiagnostics(t *testing.T, stats Diagnostics) {
+	t.Helper()
+	if stats.Header < 0 || stats.Prepare < 0 || stats.Eval <= 0 || stats.Cleanup < 0 {
+		t.Fatalf("invalid native stage durations: %+v", stats)
+	}
+}
+
+func TestJPEGObservedShrink(t *testing.T) {
+	t.Parallel()
+	for _, factor := range []int{1, 2, 4, 8} {
+		width := 320
+		if factor > 1 {
+			width *= factor * 2
+		}
+		t.Run(strconv.Itoa(factor), func(t *testing.T) {
+			t.Parallel()
+			assertJPEGShrink(t, width, factor)
+		})
+	}
+}
+
+func assertJPEGShrink(t *testing.T, width, factor int) {
+	t.Helper()
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, width, 64)), nil); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	pixels, err := Normalize(t.Context(), encoded.Bytes(), int64(width*64), 320)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pixels.Close()
+	stats := pixels.Diagnostics
+	assertNativeDiagnostics(t, stats)
+	if stats.JPEGShrink != factor || stats.JPEGWidth != width/factor || stats.JPEGHeight != 64/factor {
+		t.Fatalf("loader observation does not match its decoded dimensions: %+v", stats)
+	}
+	if stats.JPEGLoader != "VipsForeignLoadJpegBuffer" || stats.JPEGLoadBuilds < 2 || stats.JPEGMultiscan {
+		t.Fatalf("missing or incorrect actual JPEG loader properties: %+v", stats)
+	}
+	if sum := stats.Header + stats.Prepare + stats.Eval + stats.Cleanup; sum > time.Since(started) {
+		t.Fatalf("native stage durations exceed the enclosing operation: %v", sum)
+	}
+	t.Logf("shrink=%d decoded=%dx%d builds=%d header=%v prepare=%v eval=%v cleanup=%v", stats.JPEGShrink, stats.JPEGWidth, stats.JPEGHeight, stats.JPEGLoadBuilds, stats.Header, stats.Prepare, stats.Eval, stats.Cleanup)
 }
 
 func TestAVIFCodedDimensionsCannotBypassLimit(t *testing.T) {

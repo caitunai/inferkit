@@ -11,6 +11,35 @@
 
 #define PIPELINE_MAX_DIMENSION 32768
 
+/* The hook observes public loader properties without changing its options.
+ * Only this synchronous C invocation's thread can access the stack record;
+ * other requests and libvips workers have independent or empty TLS. */
+static GPrivate current_diagnostics = G_PRIVATE_INIT(NULL);
+static gboolean observe_jpeg(GSignalInvocationHint *hint, guint count,
+                             const GValue *values, gpointer unused) {
+    (void)hint; (void)unused;
+    PipelineDiagnostics *diagnostics = g_private_get(&current_diagnostics);
+    if (!diagnostics || count < 1) return TRUE;
+    GObject *object = g_value_get_object(&values[0]);
+    if (!object || !g_str_has_prefix(G_OBJECT_TYPE_NAME(object), "VipsForeignLoadJpeg")) return TRUE;
+    VipsImage *out = NULL;
+    g_object_get(object, "shrink", &diagnostics->jpeg_shrink, "out", &out, NULL);
+    diagnostics->jpeg_loads++;
+    g_strlcpy(diagnostics->jpeg_loader, G_OBJECT_TYPE_NAME(object), sizeof diagnostics->jpeg_loader);
+    if (out) {
+        diagnostics->jpeg_width = vips_image_get_width(out);
+        diagnostics->jpeg_height = vips_image_get_height(out);
+        g_object_unref(out);
+    }
+    return TRUE;
+}
+
+static void finish_stage(PipelineDiagnostics *diagnostics, int stage, gint64 *started) {
+    gint64 now = g_get_monotonic_time();
+    diagnostics->elapsed_us[stage] += now - *started;
+    *started = now;
+}
+
 typedef struct {
     struct heif_context *context;
     struct heif_image_handle *handle;
@@ -109,7 +138,12 @@ int pipeline_init(void) {
     int count = heif_get_decoder_descriptors(heif_compression_AV1, descriptors, 16);
     for (int i = 0; i < count; i++) {
         const char *id = heif_decoder_descriptor_get_id_name(descriptors[i]);
-        if (id && !strcmp(id, "dav1d")) return 0;
+        if (id && !strcmp(id, "dav1d")) {
+            gpointer object_class = g_type_class_ref(VIPS_TYPE_OBJECT);
+            guint signal = g_signal_lookup("postbuild", VIPS_TYPE_OBJECT);
+            g_type_class_unref(object_class);
+            return signal && g_signal_add_emission_hook(signal, 0, observe_jpeg, NULL, NULL) ? 0 : -1;
+        }
     }
 #endif
     return -1;
@@ -228,10 +262,9 @@ static VipsImage *thumbnail(const void *data, size_t length, uint64_t limit, int
 
 /* Preserve training order: thumbnail -> sRGB -> uchar -> flatten -> embed.
  * Return the small RGB canvas directly; tensor packing belongs to Go SIMD. */
-static void *canvas_pixels(VipsImage *small, int size, size_t *length, PipelineControl *control) {
+static VipsImage *canvas_graph(VipsImage *small, int size) {
     VipsImage *rgb = NULL, *bytes = NULL, *flat = NULL, *opaque = NULL, *canvas = NULL;
     VipsArrayDouble *white = vips_array_double_newv(3, 255.0, 255.0, 255.0);
-    void *pixels = NULL;
     if (vips_colourspace(small, &rgb, VIPS_INTERPRETATION_sRGB, NULL) ||
         vips_cast(rgb, &bytes, VIPS_FORMAT_UCHAR, NULL)) goto done;
     if (vips_image_hasalpha(bytes)) {
@@ -241,20 +274,21 @@ static void *canvas_pixels(VipsImage *small, int size, size_t *length, PipelineC
     if (vips_cast(flat, &opaque, VIPS_FORMAT_UCHAR, NULL)) goto done;
     if (vips_embed(opaque, &canvas, (size - flat->Xsize) / 2, (size - flat->Ysize) / 2,
         size, size, "extend", VIPS_EXTEND_BACKGROUND, "background", white, NULL)) goto done;
-    vips_image_set_progress(canvas, TRUE);
-    g_signal_connect(canvas, "eval", G_CALLBACK(progress), control);
-    pixels = vips_image_write_to_memory(canvas, length);
 done:
-    VIPS_UNREF(canvas); VIPS_UNREF(opaque); VIPS_UNREF(flat); VIPS_UNREF(bytes); VIPS_UNREF(rgb);
+    VIPS_UNREF(opaque); VIPS_UNREF(flat); VIPS_UNREF(bytes); VIPS_UNREF(rgb);
     vips_area_unref((VipsArea *)white);
-    return pixels;
+    return canvas;
 }
 
 PipelineResult pipeline_normalize(const void *data, size_t length, uint64_t limit, int size, PipelineControl *control) {
     PipelineResult result = {0};
     PipelineResult *out = &result;
     out->status = 1;
-    VipsImage *header = NULL, *small = NULL;
+    PipelineDiagnostics *diagnostics = &out->diagnostics;
+    g_private_set(&current_diagnostics, diagnostics);
+    gint64 started = g_get_monotonic_time();
+    int stage = PIPELINE_HEADER;
+    VipsImage *header = NULL, *small = NULL, *canvas = NULL;
     AvifSource owner = {0};
     const char *format = input_format(data, length);
     if (!format || cancelled(control)) goto done;
@@ -269,16 +303,29 @@ PipelineResult pipeline_normalize(const void *data, size_t length, uint64_t limi
     if (vips_image_get_typeof(header, VIPS_META_ORIENTATION)) vips_image_get_int(header, VIPS_META_ORIENTATION, &orientation);
     out->width = orientation >= 5 && orientation <= 8 ? header->Ysize : header->Xsize;
     out->height = orientation >= 5 && orientation <= 8 ? header->Xsize : header->Ysize;
+    if (!strcmp(format, "jpeg") && vips_image_get_typeof(header, "jpeg-multiscan"))
+        vips_image_get_int(header, "jpeg-multiscan", &diagnostics->jpeg_multiscan);
+    finish_stage(diagnostics, stage, &started);
+    stage = PIPELINE_PREPARE;
     small = thumbnail(data, length, limit, size, format, header, &owner, &out->status, control);
     if (!small) goto done;
-    out->pixels = canvas_pixels(small, size, &out->length, control);
+    canvas = canvas_graph(small, size);
+    if (!canvas) goto done;
+    vips_image_set_progress(canvas, TRUE);
+    g_signal_connect(canvas, "eval", G_CALLBACK(progress), control);
+    finish_stage(diagnostics, stage, &started);
+    stage = PIPELINE_EVAL;
+    out->pixels = vips_image_write_to_memory(canvas, &out->length);
     if (out->pixels && out->length == (size_t)size * size * 3) out->status = 0;
     else { g_free(out->pixels); out->pixels = NULL; }
 done:
-    VIPS_UNREF(small); VIPS_UNREF(header);
+    finish_stage(diagnostics, stage, &started);
+    VIPS_UNREF(canvas); VIPS_UNREF(small); VIPS_UNREF(header);
     avif_close(&owner);
     if (out->status) g_strlcpy(out->reason, vips_error_buffer(), sizeof out->reason);
     vips_error_clear();
     vips_thread_shutdown();
+    finish_stage(diagnostics, PIPELINE_CLEANUP, &started);
+    g_private_set(&current_diagnostics, NULL);
     return result;
 }

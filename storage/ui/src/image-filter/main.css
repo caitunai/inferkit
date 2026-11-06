@@ -1,2 +1,10 @@
 @import "tailwindcss";
 @import "../shared/workbench.css";
+
+.backend-selector { margin-bottom: 18px; padding: 14px; border: 1px solid #e3e8e3; border-radius: 8px; background: #f8faf8; }
+.backend-selector label { font-size: 11px; font-weight: 600; color: #546c58; }
+.backend-selector select { display: block; width: 100%; min-width: 0; min-height: 40px; margin-block: 8px; padding: 0 10px; border: 1px solid #dfe5e2; border-radius: 6px; background: #fff; color: #405148; font-size: 12px; }
+.backend-selector select:disabled { opacity: .6; cursor: wait; }
+.backend-path { display: block; overflow-wrap: anywhere; font: 10px/1.6 ui-monospace, monospace; color: #718075; }
+.backend-help { margin-top: 7px; font-size: 10px; line-height: 1.7; color: #85908b; }
+.result-backend, .history-backend { display: block; margin-top: 8px; color: #58775c; font-size: 10px; }

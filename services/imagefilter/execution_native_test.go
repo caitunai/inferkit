@@ -76,7 +76,7 @@ func TestNativeWaitingCancellationAndReuse(t *testing.T) {
 	group := xutil.ErrGroup(t.Context(), "image_filter_wait_cancel_test").Limit(1)
 	group.Go(func(context.Context) error {
 		close(started)
-		_, err := s.infer(ctx, data)
+		_, err := s.WithBackend(Libvips).infer(ctx, data)
 		return err
 	})
 	<-started

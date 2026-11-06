@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -90,7 +91,8 @@ func (s *ImageStore) Save(ctx context.Context, result imagefilter.Result) error 
 }
 
 func (s *ImageStore) newRecord(result imagefilter.Result) (ImagePrediction, error) {
-	if !validImageDigest(s.modelSHA256) || !validImageDigest(result.SHA256) || len(result.URL) > 8192 {
+	modelSHA256 := cmp.Or(result.PredictionSHA256, s.modelSHA256)
+	if !validImageDigest(modelSHA256) || !validImageDigest(result.SHA256) || len(result.URL) > 8192 {
 		return ImagePrediction{}, ErrImageQuery
 	}
 	if result.Label == "" || len(result.Label) > 128 || !validImageConfidence(float64(result.Confidence)) {
@@ -99,7 +101,7 @@ func (s *ImageStore) newRecord(result imagefilter.Result) (ImagePrediction, erro
 	hash := sha256.Sum256([]byte(result.URL))
 	return ImagePrediction{
 		URL: result.URL, URLSHA256: hex.EncodeToString(hash[:]), SHA256: result.SHA256,
-		ModelSHA256: s.modelSHA256, Label: result.Label, Confidence: float64(result.Confidence),
+		ModelSHA256: modelSHA256, Label: result.Label, Confidence: float64(result.Confidence),
 	}, nil
 }
 

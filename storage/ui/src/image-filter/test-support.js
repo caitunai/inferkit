@@ -42,9 +42,9 @@ export function deferredRequests() {
   const requests = [];
   return {
     requests,
-    fetch(_url, options) {
+    fetch(url, options) {
       return new Promise((resolve, reject) => {
-        requests.push({ options, resolve: () => resolve(successResponse()) });
+        requests.push({ url, options, resolve: () => resolve(successResponse()) });
         options.signal.addEventListener("abort", () => reject(new DOMException("canceled", "AbortError")), { once: true });
       });
     },

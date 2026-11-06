@@ -81,9 +81,15 @@ func TestImageTimingForInvalidInput(t *testing.T) {
 func assertImageDuration(tb testing.TB, fields map[string]any, names ...string) {
 	tb.Helper()
 	for _, name := range names {
-		value, ok := fields[name].(float64)
-		if !ok || value < 0 {
-			tb.Fatalf("missing duration %s: %+v", name, fields)
-		}
+		imageDuration(tb, fields, name)
 	}
+}
+
+func imageDuration(tb testing.TB, fields map[string]any, name string) float64 {
+	tb.Helper()
+	value, ok := fields[name].(float64)
+	if !ok || value < 0 {
+		tb.Fatalf("missing duration %s: %+v", name, fields)
+	}
+	return value
 }

@@ -1,5 +1,7 @@
 # 图片处理 SIMD 分析与原图对照
 
+> 本文记录此前模型及 CGO NEON/SSE2 内核的历史实验。当前已删除这些自定义 C 内核，改为可配置的 libvips 与 Go archsimd 双路径；当前构建和生产对比方法见 [图片预处理后端对比](IMAGE_PREPROCESS_BACKENDS.md)。下文历史构建命令不代表当前默认行为。
+
 本轮使用 `tmp/images/test.png`、`test.jpeg`、`test.webp`、`test.avif`。四张图片均为 1070×680、均不透明。图片文件只读，不作为源码或模型资产提交。
 
 ## 原始接口日志

@@ -15,8 +15,19 @@ import (
 	"github.com/caitun/inferkit/services/imagefilter"
 )
 
+const nativePreprocessBackend = "libvips"
+
 func TestNativeImageTimingAcrossHTTPPipeline(t *testing.T) {
-	service, data := timingModel(t)
+	assertImageTimingBackend(t, nativePreprocessBackend)
+}
+
+func TestGoImageTimingAcrossHTTPPipeline(t *testing.T) {
+	assertImageTimingBackend(t, "go")
+}
+
+func assertImageTimingBackend(t *testing.T, backend string) {
+	t.Helper()
+	service, data := timingModelBackend(t, backend)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if _, err := w.Write(data); err != nil {
 			t.Error(err)
@@ -33,8 +44,12 @@ func TestNativeImageTimingAcrossHTTPPipeline(t *testing.T) {
 		t.Fatalf("HTTP pipeline failed: %d %s", response.Code, response.Body)
 	}
 	fields := imageLogFields(t, &buffer, "image filter timing")
-	assertImageDuration(t, fields, "http_parse_ms", "source_read_ms", "hash_ms", "cache_lookup_ms", "slot_wait_ms", "preprocess_ms", "native_pipeline_ms", "tensor_ms", "inference_ms", "result_ms", "cache_store_ms", "persist_ms", "http_response_ms", "total_ms")
-	assertNativeImageTiming(t, fields)
+	assertImageDuration(t, fields, "http_parse_ms", "source_read_ms", "hash_ms", "cache_lookup_ms", "slot_wait_ms", "preprocess_ms", "tensor_ms", "inference_ms", "result_ms", "cache_store_ms", "persist_ms", "http_response_ms", "total_ms")
+	if backend == nativePreprocessBackend {
+		assertNativeImageTiming(t, fields)
+	} else {
+		assertGoImageTiming(t, fields)
+	}
 	if bytes.Count(buffer.Bytes(), []byte(`"message":"image filter timing"`)) != 1 {
 		t.Fatal("nested service duplicated the HTTP trace")
 	}
@@ -45,12 +60,36 @@ func TestNativeImageTimingAcrossHTTPPipeline(t *testing.T) {
 	t.Log(buffer.String())
 }
 
+func assertGoImageTiming(t *testing.T, fields map[string]any) {
+	t.Helper()
+	assertImageDuration(t, fields, "decode_ms", "convert_ms", "resize_ms")
+	if fields["preprocess_backend"] != "go" || fields["decode_backend"] != "go" || fields["preprocess_profile"] != "go_pillow_lanczos_rgb_320_v1" {
+		t.Fatalf("incorrect Go comparison diagnostics: %+v", fields)
+	}
+	if _, exists := fields["native_pipeline_ms"]; exists {
+		t.Fatal("Go HTTP request used native image preprocessing")
+	}
+	if imageDuration(t, fields, "decode_ms") > imageDuration(t, fields, "preprocess_ms") {
+		t.Fatal("Go preprocessing did not include decoding")
+	}
+}
+
 func assertNativeImageTiming(t *testing.T, fields map[string]any) {
 	t.Helper()
 	if fields["source_type"] != "url" || fields["cache_state"] != "miss" || fields["image_width"] != float64(320) || fields["image_height"] != float64(320) {
 		t.Fatalf("incomplete real-image diagnostics: %+v", fields)
 	}
 	assertNativeDecoderTiming(t, fields)
+	if _, exists := fields["jpeg_shrink_on_load"]; exists {
+		t.Fatal("PNG request inherited JPEG diagnostics from another request")
+	}
+	var sum float64
+	for _, name := range []string{"native_header_ms", "native_prepare_ms", "native_eval_ms", "native_cleanup_ms"} {
+		sum += imageDuration(t, fields, name)
+	}
+	if sum > imageDuration(t, fields, "native_pipeline_ms") {
+		t.Fatal("native substage timings overlap or exceed their parent")
+	}
 	if fields["execution_provider"] != "cpu" || fields["inference_attempt"] != float64(1) {
 		t.Fatalf("missing pixel format or inference sequence: %+v", fields)
 	}
@@ -64,7 +103,7 @@ func assertNativeDecoderTiming(t *testing.T, fields map[string]any) {
 	}
 }
 
-func timingModel(t *testing.T) (*imagefilter.Service, []byte) {
+func timingModelBackend(t *testing.T, backend string) (imagefilter.Detector, []byte) {
 	t.Helper()
 	dir := os.Getenv("IMAGE_FILTER_TEST_MODEL")
 	if dir == "" {
@@ -95,5 +134,9 @@ func timingModel(t *testing.T) (*imagefilter.Service, []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service, data
+	selected, err := imagefilter.ParseBackend(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service.WithBackend(selected), data
 }

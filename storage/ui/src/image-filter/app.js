@@ -2,6 +2,7 @@ import { createAutoSubmit } from "../shared/auto-submit.js";
 import { supportedImageFile } from "../shared/image.js";
 import { HISTORY_LIMIT, HISTORY_KEY, THUMBNAIL_LIMIT, imageURL, labelTitle, loadHistory, percent, readResult, saveHistory } from "./history.js";
 import { TOKEN_KEY, cleanToken, credentialExpired, loadCredential, saveCredential } from "./credential.js";
+import { DETECTION_ROUTES, detectionRoute } from "./routes.js";
 
 async function thumbnail(file, browser) {
   const bitmap = await browser.createImageBitmap(file);
@@ -38,6 +39,7 @@ export function createImageFilterApp(browser = window) {
 
   return {
     mode: "file", url: "", token: "", accessOpen: false, busy: false, dragging: false,
+    backend: "default", backendOptions: DETECTION_ROUTES,
     tokenExpiresAt: 0, credentialNotice: "", previewErrors: {},
     fileName: "", fileSize: "", fileKind: "file", preview: "", previewFailed: false,
     error: "", notice: "", history: [], activeID: "", historyFilter: "all",
@@ -48,6 +50,7 @@ export function createImageFilterApp(browser = window) {
       this.timeout = (Number(this.$el.dataset.timeoutMs) || 30000) + 2000;
       try { this.history = loadHistory(storage()); } catch { this.notice = "浏览器未开放会话存储，历史仅保留到本次刷新前。"; }
       this.activeID = this.history[0]?.id || "";
+      this.backend = this.history[0]?.backend || "default";
       try {
         const credential = loadCredential(browser.localStorage);
         this.token = credential?.token || "";
@@ -56,6 +59,7 @@ export function createImageFilterApp(browser = window) {
     },
     destroy() { disposed = true; selection++; automatic.destroy(); request?.abort(); releasePreview(); },
     get active() { return this.history.find((item) => item.id === this.activeID) || null; },
+    get selectedRoute() { return detectionRoute(this.backend); },
     get result() { return this.active?.result || null; },
     get successCount() { return this.history.filter((item) => item.result).length; },
     get filteredHistory() {
@@ -77,6 +81,9 @@ export function createImageFilterApp(browser = window) {
     timeLabel(value) { return new Date(value).toLocaleTimeString("zh-CN", { hour12: false }); },
     durationLabel(value) { return value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(2)} s`; },
     sourceLabel(kind) { return ({ file: "本地文件", paste: "粘贴图片", url: "图片 URL" })[kind]; },
+    routeName(backend) { return detectionRoute(backend).label; },
+    routePath(backend) { return detectionRoute(backend).path; },
+    onBackendChange() { clearAuto(); this.error = ""; return this.autoDetect(); },
     selectMode(mode) {
       if (this.mode === mode) return;
       clearAuto(); this.mode = mode; this.error = "";
@@ -84,8 +91,11 @@ export function createImageFilterApp(browser = window) {
       else if (file) return this.autoDetect();
     },
     sourceKey() {
-      if (this.mode === "file") return file ? `file:${selection}` : "";
-      try { return `url:${imageURL(this.url)}`; } catch { return ""; }
+      try {
+        const backend = detectionRoute(this.backend).id;
+        if (this.mode === "file") return file ? `${backend}:file:${selection}` : "";
+        return `${backend}:url:${imageURL(this.url)}`;
+      } catch { return ""; }
     },
     onURLInput(value, composing = false) {
       this.url = value; this.error = ""; clearAuto();
@@ -168,12 +178,17 @@ export function createImageFilterApp(browser = window) {
       if (!this.token.trim()) { this.accessOpen = true; this.error = "请在访问设置中填写 API Token，再开始检测。"; return; }
       if (!this.rememberToken(false)) return;
       let sourceURL = "";
-      try { if (this.mode === "url") sourceURL = imageURL(this.url); } catch (error) { this.error = error.message; return; }
+      let route;
+      try {
+        route = detectionRoute(this.backend);
+        if (this.mode === "url") sourceURL = imageURL(this.url);
+      } catch (error) { this.error = error.message; return; }
       automatic.started(this);
       const version = selection;
       const kind = this.mode === "url" ? "url" : this.fileKind;
       const entry = {
         id: browser.crypto.randomUUID(), time: Date.now(), duration: 0, kind,
+        backend: route.id,
         name: sourceURL || this.fileName, sourceURL,
         thumbnail: sourceURL ? "" : this.pendingThumbnail, result: null, error: "",
       };
@@ -188,7 +203,7 @@ export function createImageFilterApp(browser = window) {
       const timer = browser.setTimeout(() => { timedOut = true; controller.abort(); }, this.timeout);
       const started = browser.performance.now();
       try {
-        const response = await browser.fetch("/api/image/filter", { method: "POST", headers, body, signal: controller.signal, credentials: "same-origin" });
+        const response = await browser.fetch(route.path, { method: "POST", headers, body, signal: controller.signal, credentials: "same-origin" });
         const payload = await response.json().catch(() => null);
         if (!response.ok || payload?.status !== 0) {
           if ([401, 403].includes(response.status)) { this.forgetToken(); this.accessOpen = true; }

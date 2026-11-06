@@ -40,6 +40,16 @@ func DecodeWithFormat(data []byte, maxPixels int64) (image.Image, string, error)
 
 // DecodeWithBackend reports the decoder actually used, including native fallback.
 func DecodeWithBackend(data []byte, maxPixels int64) (image.Image, string, string, error) {
+	return decodeWithBackend(data, maxPixels, true)
+}
+
+// DecodeGoWithBackend skips libvips even in a vips build. JPEG uses image/jpeg;
+// AVIF retains its existing bounded gav1d decoder.
+func DecodeGoWithBackend(data []byte, maxPixels int64) (image.Image, string, string, error) {
+	return decodeWithBackend(data, maxPixels, false)
+}
+
+func decodeWithBackend(data []byte, maxPixels int64, allowNative bool) (image.Image, string, string, error) {
 	config, format, err := imageConfig(data)
 	if err != nil {
 		return nil, format, "", err
@@ -50,8 +60,11 @@ func DecodeWithBackend(data []byte, maxPixels int64) (image.Image, string, strin
 	if err = validateDimensions(config, maxPixels); err != nil {
 		return nil, format, "", err
 	}
+	if !allowNative && multipleImages(data, format) {
+		return nil, format, "", ErrInput
+	}
 	backend := "go"
-	img, native := nativeDecode(data, config, format)
+	img, native := optionalNativeDecode(data, config, format, allowNative)
 	if native {
 		backend = NativeDecoder
 	} else {
@@ -64,6 +77,13 @@ func DecodeWithBackend(data []byte, maxPixels int64) (image.Image, string, strin
 		img = orientedImage{source: img, orientation: orientation}
 	}
 	return img, format, backend, nil
+}
+
+func optionalNativeDecode(data []byte, config image.Config, format string, enabled bool) (image.Image, bool) {
+	if enabled {
+		return nativeDecode(data, config, format)
+	}
+	return nil, false
 }
 
 func imageConfig(data []byte) (image.Config, string, error) {

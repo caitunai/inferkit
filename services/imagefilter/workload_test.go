@@ -31,7 +31,7 @@ func TestLegacyUserImagesPreserveScalarTensor(t *testing.T) {
 
 func userScalarTensor(t *testing.T, data []byte) []float32 {
 	t.Helper()
-	img, format, decoder, err := imageinput.DecodeWithBackend(data, 20_000_000)
+	img, format, decoder, err := imageinput.DecodeGoWithBackend(data, 20_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}

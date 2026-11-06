@@ -1,7 +1,10 @@
 // Package vips owns the shared libvips CGO runtime, decoding and native pixel lifetime.
 package vips
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 var (
 	// ErrUnavailable means the native libraries cannot implement the model profile.
@@ -26,11 +29,27 @@ type Header struct {
 	Height int
 }
 
+// Diagnostics reports non-overlapping native wall times and observed JPEG loader properties.
+// Prepare can include eager decoding; Eval is only the final canvas materialization.
+type Diagnostics struct {
+	JPEGLoader     string
+	Header         time.Duration
+	Prepare        time.Duration
+	Eval           time.Duration
+	Cleanup        time.Duration
+	JPEGShrink     int
+	JPEGWidth      int
+	JPEGHeight     int
+	JPEGLoadBuilds int
+	JPEGMultiscan  bool
+}
+
 // Pixels owns interleaved RGB bytes in native memory. Call Close after consuming Data.
 type Pixels struct {
-	release func()
-	Data    []byte
-	Header  Header
+	release     func()
+	Data        []byte
+	Header      Header
+	Diagnostics Diagnostics
 }
 
 // Close releases native pixels once. Pixels has one caller and is not shared.

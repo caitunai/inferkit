@@ -12,7 +12,7 @@ const entry = (id = "one") => ({ id, kind: "file", time: 1000, duration: 40, nam
 test("history survives refresh and never serializes credentials or original files", () => {
   const session = storage();
   assert.equal(saveHistory(session, [{ ...entry(), token: "secret", file: { secret: true } }]), true);
-  assert.deepEqual(loadHistory(session), [{ ...entry(), error: "" }]);
+  assert.deepEqual(loadHistory(session), [{ ...entry(), backend: "default", error: "" }]);
   assert.doesNotMatch(session.getItem(HISTORY_KEY), /secret|token/);
   session.removeItem(HISTORY_KEY);
   assert.deepEqual(loadHistory(session), []);
@@ -39,4 +39,16 @@ test("URL validation excludes unsafe schemes and credential-bearing URLs", () =>
 test("malformed prediction payloads never become successful history records", () => {
   assert.deepEqual(readResult(result), result);
   for (const invalid of [{ ...result, class_id: 0 }, { ...result, probabilities: [NaN, 1] }, { ...result, probabilities: [0.8, 0.8] }]) assert.throws(() => readResult(invalid));
+});
+
+test("backend history preserves explicit routes and upgrades old entries", () => {
+  const session = storage();
+  session.setItem(HISTORY_KEY, JSON.stringify([
+    { ...entry("go"), backend: "go" }, { ...entry("native"), backend: "libvips" }, entry("legacy"),
+    { ...entry("unsafe"), backend: "https://example.com/api/image/filter" },
+  ]));
+  const values = loadHistory(session);
+  assert.deepEqual(values.map((value) => value.backend), ["go", "libvips", "default"]);
+  assert.equal(saveHistory(session, values), true);
+  assert.deepEqual(loadHistory(session), values);
 });

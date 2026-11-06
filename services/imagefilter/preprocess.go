@@ -14,7 +14,15 @@ func preprocess(ctx context.Context, data []byte, maxPixels int64, dst []float32
 	return preprocessNative(ctx, data, maxPixels, dst)
 }
 
-func preprocessWithBudget(ctx context.Context, data []byte, maxPixels int64, dst []float32, reserve func() preparationLease) error {
+func preprocessWithBudget(ctx context.Context, data []byte, maxPixels int64, dst []float32, reserve func() preparationLease) (returnErr error) {
+	if len(dst) != inputLength {
+		return ErrPreprocess
+	}
+	finished := imagetiming.Measure(ctx, imagetiming.Preprocess)
+	defer func() { finished(returnErr) }()
+	if err := ctx.Err(); err != nil {
+		return errors.Join(ErrPreprocess, err)
+	}
 	done := imagetiming.Measure(ctx, imagetiming.Decode)
 	img, err := decodeImage(ctx, data, maxPixels)
 	if err != nil {
@@ -30,13 +38,10 @@ func preprocessWithBudget(ctx context.Context, data []byte, maxPixels int64, dst
 	if trace := imagetiming.From(ctx); trace != nil {
 		trace.Image(b.Dx(), b.Dy(), pixelType(img))
 	}
-	done = imagetiming.Measure(ctx, imagetiming.Preprocess)
 	scale := min(float64(imageSize)/float64(b.Dx()), float64(imageSize)/float64(b.Dy()))
 	w := max(1, min(imageSize, int(math.RoundToEven(float64(b.Dx())*scale))))
 	h := max(1, min(imageSize, int(math.RoundToEven(float64(b.Dy())*scale))))
-	err = prepareTensor(ctx, img, w, h, dst, reserve)
-	done(err)
-	return err
+	return prepareTensor(ctx, img, w, h, dst, reserve)
 }
 
 func prepareTensor(ctx context.Context, img image.Image, w, h int, dst []float32, reserve func() preparationLease) error {
@@ -56,7 +61,7 @@ func prepareTensor(ctx context.Context, img image.Image, w, h int, dst []float32
 }
 
 func decodeImage(ctx context.Context, data []byte, maxPixels int64) (image.Image, error) {
-	img, format, decoder, err := imageinput.DecodeWithBackend(data, maxPixels)
+	img, format, decoder, err := imageinput.DecodeGoWithBackend(data, maxPixels)
 	if trace := imagetiming.From(ctx); trace != nil {
 		trace.Format(format)
 		trace.Decoder(decoder)

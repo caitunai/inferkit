@@ -43,6 +43,6 @@ jobs:
         run: |
           go test -v github.com/yalue/onnxruntime_go -run '^(TestGetVersion|TestCreateTensor)$'
           GOEXPERIMENT=simd go test -tags "${{ matrix.image_tags }}" ./services/internal/vips ./services/imageinput ./services/imagepipeline ./services/imagefilter ./api/handler ./api/server
-          GOEXPERIMENT=simd GODEBUG=cpu.avx=off go test -tags "${{ matrix.image_tags }}" ./services/imagefilter -run '^TestRGBTensorExact$'
+          GOEXPERIMENT=simd GODEBUG=cpu.avx=off go test -tags "${{ matrix.image_tags }}" ./services/imagefilter -run '^(TestRGBTensorExact|TestTensorAllAlphaAndChannelValues|TestResampleKernelMatchesScalar|TestGoPreparationUsesGoJPEGAndAllFormats)$'
       - name: Verify deployment script guards
         run: python3 -B -m unittest discover -s scripts/tests -v

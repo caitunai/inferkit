@@ -42,11 +42,7 @@ func TestImageFilterAuthenticatedAPIIntegration(t *testing.T) {
 	s.ImageFilter = filter
 	router := s.newRouter()
 	assertImageFilterPage(t, router)
-	unauthorized := httptest.NewRecorder()
-	router.ServeHTTP(unauthorized, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/image/filter", nil))
-	if unauthorized.Code != http.StatusForbidden {
-		t.Fatalf("unauthenticated request: %d", unauthorized.Code)
-	}
+	assertBackendAuthorization(t, router)
 	request := imageFilterUpload(t, dir)
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
@@ -56,6 +52,19 @@ func TestImageFilterAuthenticatedAPIIntegration(t *testing.T) {
 	}
 	assertImageFilterFormats(t, router, token)
 }
+
+func assertBackendAuthorization(t *testing.T, router http.Handler) {
+	t.Helper()
+	for _, path := range imageBackendPaths {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, nil))
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("unauthenticated backend %s: %d", path, response.Code)
+		}
+	}
+}
+
+var imageBackendPaths = [...]string{"/api/image/filter", "/api/image/filter/libvips", "/api/image/filter/go"}
 
 func assertImageFilterFormats(t *testing.T, router http.Handler, token string) {
 	t.Helper()
@@ -75,13 +84,24 @@ func assertImageFilterFormats(t *testing.T, router http.Handler, token string) {
 		}
 		// A misleading extension and generic upload content type must not prevent
 		// decoding supported formats from their actual bytes.
-		request := imageFilterUploadBytes(t, data, "image.bin")
-		request.Header.Set("Authorization", "Bearer "+token)
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, request)
-		if response.Code != http.StatusOK {
-			t.Errorf("%s upload: %d %s", format, response.Code, response.Body)
+		for _, path := range imageBackendPaths {
+			assertBackendFormat(t, router, token, path, data)
 		}
+	}
+}
+
+func assertBackendFormat(t *testing.T, router http.Handler, token, path string, data []byte) {
+	t.Helper()
+	request := imageFilterUploadBytes(t, data, "image.bin")
+	request.URL.Path = path
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Errorf("%s upload: %d %s", path, response.Code, response.Body)
+	}
+	if strings.Contains(response.Body.String(), "prediction_sha256") || strings.Contains(response.Body.String(), "PredictionSHA256") {
+		t.Fatal("internal record identity leaked into the public response")
 	}
 }
 

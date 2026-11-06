@@ -9,6 +9,16 @@ POST {BASE_URL}/api/image/filter
 Authorization: Bearer {API_TOKEN}
 ```
 
+服务默认同时提供两条图片处理路径，无需切换服务配置：
+
+| 路径 | 图片处理后端 |
+| --- | --- |
+| `/api/image/filter` | libvips，保留原有默认行为 |
+| `/api/image/filter/libvips` | 显式 libvips |
+| `/api/image/filter/go` | Go 解码与 Lanczos，按构建及 CPU 能力使用 archsimd |
+
+以上接口均使用 POST，鉴权、请求体与响应结构一致。调用方仅需替换路径即可对比；两条路径共享模型和总资源预算，但分别缓存结果。Go 路径与 libvips 训练预处理存在数值差异，类别及概率应一并评估，详见[后端对比](IMAGE_PREPROCESS_BACKENDS.md)。
+
 `BASE_URL` 和 `API_TOKEN` 由服务提供方交付，生产环境应使用 HTTPS。每次请求检测一张图片，支持上传文件或提供图片 URL，返回分类和各类别概率。
 
 Token 由服务管理员在服务器上签发，例如：

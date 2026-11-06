@@ -40,6 +40,9 @@ type DecodeError = vips.DecodeError
 // Header describes the source before thumbnailing, with orientation applied to dimensions.
 type Header = vips.Header
 
+// Diagnostics exposes native stage measurements and observed JPEG loader properties.
+type Diagnostics = vips.Diagnostics
+
 // Pixels owns a native buffer of interleaved RGB bytes. Call Close after consuming Data.
 // The fixed-size canvas and all image operations are produced in libvips.
 type Pixels = vips.Pixels

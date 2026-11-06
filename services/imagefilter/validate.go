@@ -43,6 +43,15 @@ type Validation struct {
 
 // Validate compares all exported fixtures without caching their results.
 func (s *Service) Validate(ctx context.Context) ([]Validation, error) {
+	return s.WithBackend(Libvips).Validate(ctx)
+}
+
+// Validate compares fixtures using the selected backend without relaxing tolerances.
+func (d Detector) Validate(ctx context.Context) ([]Validation, error) {
+	if _, err := ParseBackend(string(d.backend)); err != nil {
+		return nil, err
+	}
+	s := d.service
 	if err := s.admit(); err != nil {
 		return nil, err
 	}
@@ -57,7 +66,7 @@ func (s *Service) Validate(ctx context.Context) ([]Validation, error) {
 	results := make([]Validation, 0, len(file.Samples))
 	var resultErr error
 	for _, sample := range file.Samples {
-		result, err := s.validateSample(ctx, sample, file)
+		result, err := d.validateSample(ctx, sample, file)
 		if err != nil {
 			return results, err
 		}
@@ -80,7 +89,8 @@ func (s *Service) fixture(path string) ([]byte, error) {
 	return data, nil
 }
 
-func (s *Service) validateSample(ctx context.Context, sample validationSample, file validationFile) (Validation, error) {
+func (d Detector) validateSample(ctx context.Context, sample validationSample, file validationFile) (Validation, error) {
+	s := d.service
 	ctx, cancel := context.WithTimeout(ctx, s.config.Timeout)
 	defer cancel()
 	input, err := s.fixture(sample.InputFile)
@@ -95,11 +105,12 @@ func (s *Service) validateSample(ctx context.Context, sample validationSample, f
 		return Validation{}, errors.Join(ErrValidation, ctx.Err())
 	case slot := <-s.engine.slots:
 		defer func() { s.engine.slots <- slot }()
-		return s.compareSample(ctx, slot, input, sample, file)
+		return d.compareSample(ctx, slot, input, sample, file)
 	}
 }
 
-func (s *Service) compareSample(ctx context.Context, slot *tensorSlot, input []byte, sample validationSample, file validationFile) (Validation, error) {
+func (d Detector) compareSample(ctx context.Context, slot *tensorSlot, input []byte, sample validationSample, file validationFile) (Validation, error) {
+	s := d.service
 	tensor := slot.input.GetData()
 	for i := range tensor {
 		tensor[i] = math.Float32frombits(binary.LittleEndian.Uint32(input[i*4:]))
@@ -116,7 +127,7 @@ func (s *Service) compareSample(ctx context.Context, slot *tensorSlot, input []b
 	if err != nil {
 		return Validation{}, err
 	}
-	if err = preprocess(ctx, data, s.config.MaxPixels, tensor); err != nil {
+	if err = d.prepare(ctx, data, tensor); err != nil {
 		return Validation{}, err
 	}
 	maxError := tensorDifference(tensor, input)

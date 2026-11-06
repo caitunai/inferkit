@@ -25,11 +25,19 @@ func preprocessNative(ctx context.Context, data []byte, maxPixels int64, dst []f
 		trace.ResizeBackend("libvips")
 		trace.ResizeWorkers(1)
 		trace.Image(pixels.Header.Width, pixels.Header.Height, "rgb")
+		recordNativeDiagnostics(trace, pixels.Diagnostics)
 	}
 	doneTensor := imagetiming.Measure(ctx, imagetiming.Tensor)
 	writeRGBTensor(pixels.Data, dst)
 	doneTensor(nil)
 	return nil
+}
+
+func recordNativeDiagnostics(trace *imagetiming.Trace, stats imagepipeline.Diagnostics) {
+	trace.Native(stats.Header, stats.Prepare, stats.Eval, stats.Cleanup)
+	if stats.JPEGLoader != "" {
+		trace.JPEG(stats.JPEGLoader, stats.JPEGShrink, stats.JPEGWidth, stats.JPEGHeight, stats.JPEGLoadBuilds, stats.JPEGMultiscan)
+	}
 }
 
 func normalizedPixels(ctx context.Context, data []byte, maxPixels int64) (*imagepipeline.Pixels, error) {

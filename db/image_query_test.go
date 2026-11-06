@@ -45,6 +45,21 @@ func TestImageRecordValidation(t *testing.T) {
 	}
 }
 
+func TestImageRecordBackendIdentity(t *testing.T) {
+	t.Parallel()
+	store := &ImageStore{modelSHA256: strings.Repeat("b", 64)}
+	result := imageTestResult(t.Name(), 0.9)
+	result.PredictionSHA256 = strings.Repeat("c", 64)
+	row, err := store.newRecord(result)
+	if err != nil || row.ModelSHA256 != result.PredictionSHA256 {
+		t.Fatalf("request backend identity lost: %+v %v", row, err)
+	}
+	result.PredictionSHA256 = "invalid"
+	if _, err = store.newRecord(result); !errors.Is(err, ErrImageQuery) {
+		t.Fatal("invalid request identity accepted")
+	}
+}
+
 func TestImageFileOnlyNeverTouchesDatabase(t *testing.T) {
 	t.Parallel()
 	store := new(ImageStore)

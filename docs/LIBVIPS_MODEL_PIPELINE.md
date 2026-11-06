@@ -1,6 +1,6 @@
 # 当前模型的 libvips 预处理
 
-图片检测的 CLI 和 API 现在统一使用 `libvips_thumbnail_rgb_320_v2`。部署包来自 `tmp/artwork_fp32`，模型 SHA-256 为 `9d28cca25c765439e35cabc2f435a678e2ae996d45bacd79e434ca7afc3abe50`。`image.filter.model` 仍可配置，更换模型后重启加载；程序校验模型摘要、输入输出、标签及预处理契约。
+图片检测的原有入口默认使用 `libvips_thumbnail_rgb_320_v2`。部署包来自 `tmp/artwork_fp32`，模型 SHA-256 为 `9d28cca25c765439e35cabc2f435a678e2ae996d45bacd79e434ca7afc3abe50`。`image.filter.model` 仍可配置，更换模型后重启加载；程序校验模型摘要、输入输出、标签及预处理契约。旧 Go 解码和 archsimd 路径同时可用，通过 CLI `--preprocess go` 或 API `/api/image/filter/go` 选择，详见[生产对比说明](IMAGE_PREPROCESS_BACKENDS.md)。
 
 ## 实际数据流
 
@@ -18,7 +18,7 @@
   → ONNX Runtime → 类别和概率
 ```
 
-格式白名单沿用现有四种格式。Go 请求路径不再进行图片解码、方向变换、Lanczos、透明度合成或画布填充，不构造原分辨率 `image.Image`。原生 RGB 缓冲区在张量转换完成后释放；不再为通道拆分创建额外 libvips 图像或中间平面。旧 Go/Pillow 函数保留供已有测试和性能对照使用，生产检测不会回退到这些函数。
+格式白名单沿用现有四种格式。默认 libvips 路径不在 Go 中进行图片解码、方向变换、Lanczos、透明度合成或画布填充，不构造原分辨率 `image.Image`。原生 RGB 缓冲区在张量转换完成后释放；不再为通道拆分创建额外 libvips 图像或中间平面。只有通过 CLI 参数或 API 路径选择 Go 时才使用旧 Go/Pillow 算法，不会自动回退。
 
 读取、鉴权、URL、缓存开关、缓存容量和 TTL、响应字段保持原有接口契约。没有新增后台任务或处理队列。结果缓存/同图合并可继续用 `image.filter.bypassCache=true` 旁路。
 
@@ -34,7 +34,7 @@
 
 ## 模型和数值验收
 
-启动拒绝旧 Pillow 清单、不匹配的裁剪/拉伸/颜色/alpha 规则及矛盾的 training_preprocessing。原生 libvips 版本必须与模型清单的 libvips_version 一致，本包为 8.18.7。缺少 CGO、`vips` 构建标签、必要版本或 dav1d 时明确报错。
+启动拒绝旧 Pillow 清单、不匹配的裁剪/拉伸/颜色/alpha 规则及矛盾的 training_preprocessing。原生 libvips 版本必须与模型清单的 libvips_version 一致，本包为 8.18.7。双后端分类服务缺少 CGO、`vips` 构建标签、必要版本或 dav1d 时明确报错；Go 请求处理不调用 libvips，并在日志标明它不满足当前训练像素契约。
 
 本机通过实际训练源码 `normalize_images.py:normalize_pixels`、pyvips 3.2.0、libvips 8.18.7 独立对照：
 
@@ -114,7 +114,7 @@ export LD_LIBRARY_PATH=/opt/inferkit/image/lib:/opt/inferkit/onnxruntime/lib
 
 程序和全部私有动态库均纳入 Debian 11 ABI 检查。Debian 11 系统自带的旧 libvips/libheif 不能直接替代这个与模型配套的包。在更新系统构建出的二进制也不能直接当作 Debian 11 ABI 产物。
 
-Docker 默认 `WITH_VIPS=true`，同样从固定源码构建上述原生库，并安装 Debian libjpeg62-turbo 运行依赖。保留 `WITH_VIPS=false` / `INFERKIT_WITH_VIPS=0` 供不加载这个分类模型的其他功能使用；这些构建无法运行要求 libvips 的新模型。
+Docker 默认 `WITH_VIPS=true`，同样从固定源码构建上述原生库，并安装 Debian libjpeg62-turbo 运行依赖。`WITH_VIPS=false` / `INFERKIT_WITH_VIPS=0` 构建供不加载此分类模型的其他功能使用；双后端分类服务需要带 libvips 的构建。
 
 ## SIMD、资源及观测
 
@@ -125,13 +125,35 @@ Go 1.27 的 `simd/archsimd` 通过 `GOEXPERIMENT=simd` 启用。M2 使用 NEON�
 请求日志使用：
 
 - `native_pipeline_ms`：从原生头部检查到实际生成 RGB 像素及原生清理，包含解码/缩放/颜色/合成/补白。
+- `native_header_ms`：格式、动画/页数、尺寸和 EXIF 检查及原生头部读取。
+- `native_prepare_ms`：准备缩略图及 sRGB/alpha/画布处理图。可能包含实际解码和其他即时工作；当前 AVIF 的 dav1d 解码就在这一阶段。
+- `native_eval_ms`：最终 `vips_image_write_to_memory` 求值，包含尚未执行的解码、缩放、颜色转换、合成、补白及输出写入；不能把它单独叫做 resize 耗时。
+- `native_cleanup_ms`：最终临时图像、libheif owner、错误缓冲和线程资源清理；返回的 RGB 内存在张量转换后才释放。
 - `tensor_ms`：Go RGB→NCHW 和归一化。
 - `preprocess_ms`：上述两部分及少量调用/释放开销的父项。
 - `decode_backend=libvips`、`resize_backend=libvips`；启动日志另外记录 `avif_decoder=dav1d`、`jpeg_library`、实际 libvips 版本、模型摘要和真实张量后端。
 
 不再把构造延迟执行图的时间当作单独 decode/resize 耗时，因此新路径不会输出误导性的 `decode_ms`、`resize_horizontal_ms` 等旧阶段。
 
+四个原生子阶段互不重叠，使用 C 中的单调时钟记录，精度为微秒；之和接近 `native_pipeline_ms`，差值还包括 CGO、取消控制和 Go 诊断封装开销。它们是父项的细分，不能再次加到父项或 `total_ms` 上。成功请求输出这些子阶段；原生失败时保留原有总耗时和失败阶段。
+
+JPEG 成功构建 loader 时，还输出：
+
+- `jpeg_loader`：实际构建的 loader 类型。
+- `jpeg_shrink_on_load`：实际读取的 `shrink` 属性，值为 1/2/4/8；1 表示未解码缩小。
+- `jpeg_decode_width` / `jpeg_decode_height`：该 loader 输出的像素尺寸，位于 EXIF 方向修正之前。
+- `jpeg_loader_builds`：此原生调用线程中观察到的 JPEG loader 构建次数，包括头部读取，**不是完整像素解码次数**。
+- `jpeg_multiscan`：头部报告的多扫描 JPEG 标志。
+
+通过一次注册的 libvips `postbuild` 观测钩子读取公开属性，只有当前请求原生线程的 TLS 记录会被更新；其他请求及像素工作线程不会写入这份记录。不接管全局日志、不保存图片或 URL、不修改 loader 参数，也不按尺寸推算实际缩小倍数。没有观察到 JPEG loader 时省略这些字段。并发测试覆盖不同缩小倍数和其他格式，避免诊断串入其他请求。
+
+诊断开销对照使用本地四格式样本、每项预热 5 次后测量 100 次，提交版本和诊断版本交替运行三轮。仅测完整原生调用及像素释放，不含 Go/HTTP/ONNX；四格式的三轮中位 P50 变化绝对值均小于 0.5%，处于本次测量波动范围。原始报告在忽略提交的 `tmp/native-diagnostics/`；不应将这组较小样本的耗时用于解释其他大图的绝对耗时。
+
 旧的 [SIMD 报告](IMAGE_PIPELINE_SIMD.md) 和 [libvips 原型报告](VIPS_PIPELINE_EVALUATION.md) 是此前模型/处理链的历史记录，不是当前模型的部署协议。
+
+针对多扫描 JPEG 的强制 1/4 解码、条件色彩处理和 1/2/4/8 线程对照，见 [A～F 实验报告](IMAGE_NATIVE_AB.md)。其中 C/E 已是当前实现，B 超出当前像素容差，实验没有替换生产默认路径。
+
+`native_eval` 区间内的真实 CPU 样本、JPEG 解码/重采样/颜色及输出归属，见 [原生 CPU 采样报告](IMAGE_NATIVE_CPU_PROFILE.md)。当前多扫描原图的主要热点是 JPEG 熵解码与系数细化。
 
 
 ## M2 Pro 完整内存请求对照

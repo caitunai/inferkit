@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -56,15 +57,28 @@ func Normalize(ctx context.Context, data []byte, maxPixels int64, size int) (*Pi
 	}
 	memory := result.pixels
 	pixels := &Pixels{
-		Header:  Header{Format: C.GoString(&result.format[0]), Width: int(result.width), Height: int(result.height)},
-		Data:    unsafe.Slice((*byte)(memory), int(result.length)),
-		release: func() { C.pipeline_free(memory) },
+		Header:      Header{Format: C.GoString(&result.format[0]), Width: int(result.width), Height: int(result.height)},
+		Diagnostics: nativeDiagnostics(result.diagnostics),
+		Data:        unsafe.Slice((*byte)(memory), int(result.length)),
+		release:     func() { C.pipeline_free(memory) },
 	}
 	if err := ctx.Err(); err != nil {
 		pixels.Close()
 		return nil, errors.Join(ErrInput, err)
 	}
 	return pixels, nil
+}
+
+func nativeDiagnostics(stats C.PipelineDiagnostics) Diagnostics {
+	return Diagnostics{
+		Header:     time.Duration(stats.elapsed_us[C.PIPELINE_HEADER]) * time.Microsecond,
+		Prepare:    time.Duration(stats.elapsed_us[C.PIPELINE_PREPARE]) * time.Microsecond,
+		Eval:       time.Duration(stats.elapsed_us[C.PIPELINE_EVAL]) * time.Microsecond,
+		Cleanup:    time.Duration(stats.elapsed_us[C.PIPELINE_CLEANUP]) * time.Microsecond,
+		JPEGLoader: C.GoString(&stats.jpeg_loader[0]),
+		JPEGShrink: int(stats.jpeg_shrink), JPEGWidth: int(stats.jpeg_width), JPEGHeight: int(stats.jpeg_height),
+		JPEGLoadBuilds: int(stats.jpeg_loads), JPEGMultiscan: stats.jpeg_multiscan != 0,
+	}
 }
 
 func nativeCause(result C.PipelineResult) error {

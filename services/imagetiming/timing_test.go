@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json/v2"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -26,6 +27,31 @@ func TestTraceOwnership(t *testing.T) {
 	_, separate := New(ctx)
 	if separate == trace {
 		t.Fatal("separate request reused parent trace")
+	}
+}
+
+func TestNativeDiagnosticsFields(t *testing.T) {
+	t.Parallel()
+	var buffer bytes.Buffer
+	output := zerolog.New(&buffer)
+	ctx, trace := New(output.WithContext(t.Context()))
+	trace.Native(time.Millisecond, 2*time.Millisecond, 3*time.Millisecond, 4*time.Millisecond)
+	trace.JPEG("VipsForeignLoadJpegBuffer", 2, 540, 932, 3, true)
+	trace.Finish(ctx, true, 0)
+	var fields map[string]any
+	if err := json.Unmarshal(buffer.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for field, want := range map[string]float64{
+		"native_header_ms": 1, "native_prepare_ms": 2, "native_eval_ms": 3, "native_cleanup_ms": 4,
+		"jpeg_shrink_on_load": 2, "jpeg_decode_width": 540, "jpeg_decode_height": 932, "jpeg_loader_builds": 3,
+	} {
+		if fields[field] != want {
+			t.Fatalf("%s: got %v want %v", field, fields[field], want)
+		}
+	}
+	if fields["jpeg_loader"] != "VipsForeignLoadJpegBuffer" || fields["jpeg_multiscan"] != true {
+		t.Fatal("missing observed JPEG properties")
 	}
 }
 

@@ -3,12 +3,20 @@
 #include <stddef.h>
 #include <stdint.h>
 
+enum { PIPELINE_HEADER, PIPELINE_PREPARE, PIPELINE_EVAL, PIPELINE_CLEANUP, PIPELINE_STAGES };
+typedef struct {
+    int64_t elapsed_us[PIPELINE_STAGES];
+    int jpeg_shrink, jpeg_width, jpeg_height, jpeg_loads, jpeg_multiscan;
+    char jpeg_loader[64];
+} PipelineDiagnostics;
+
 typedef struct {
     void *pixels;
     size_t length;
     int width, height, status;
     char format[8];
     char reason[256];
+    PipelineDiagnostics diagnostics;
 } PipelineResult;
 typedef struct PipelineControl PipelineControl;
 int pipeline_init(void);

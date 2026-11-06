@@ -33,7 +33,23 @@ var ErrImageResultSave = errors.New("save image prediction failed")
 
 // FilterImage accepts multipart file/url, JSON url, or form-encoded url.
 func FilterImage(service ImageChecker, recorder ImageRecorder) base.HandlerFunc {
-	maxBytes, timeout, maxRequests := service.Limits()
+	_, _, maxRequests := service.Limits()
+	return filterImage(service, recorder, make(chan struct{}, maxRequests))
+}
+
+// FilterImageBackends shares body admission across both backends and URL aliases.
+func FilterImageBackends(service *imagefilter.Service, recorder ImageRecorder) (base.HandlerFunc, base.HandlerFunc) {
+	return filterImageBackends(service.WithBackend(imagefilter.Libvips), service.WithBackend(imagefilter.Go), recorder)
+}
+
+func filterImageBackends(native, goBackend ImageChecker, recorder ImageRecorder) (base.HandlerFunc, base.HandlerFunc) {
+	_, _, maxRequests := native.Limits()
+	admission := make(chan struct{}, maxRequests)
+	return filterImage(native, recorder, admission), filterImage(goBackend, recorder, admission)
+}
+
+func filterImage(service ImageChecker, recorder ImageRecorder, admission chan struct{}) base.HandlerFunc {
+	maxBytes, timeout, _ := service.Limits()
 	check := func(ctx context.Context, source imageinput.Source) (imagefilter.Result, error) {
 		result, err := service.Check(ctx, source)
 		if err != nil {
@@ -45,7 +61,7 @@ func FilterImage(service ImageChecker, recorder ImageRecorder) base.HandlerFunc 
 		}
 		return result, nil
 	}
-	h := &imageRequestHandler[imagefilter.Result]{check: check, report: imageFilterError, busy: imagefilter.ErrBusy, admission: make(chan struct{}, maxRequests), maxBytes: maxBytes, timeout: timeout}
+	h := &imageRequestHandler[imagefilter.Result]{check: check, report: imageFilterError, busy: imagefilter.ErrBusy, admission: admission, maxBytes: maxBytes, timeout: timeout}
 	return measuredImageFilter(h.handle)
 }
 

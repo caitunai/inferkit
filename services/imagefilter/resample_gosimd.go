@@ -1,4 +1,4 @@
-//go:build goexperiment.simd && arm64 && !purego
+//go:build goexperiment.simd && (arm64 || amd64) && !purego
 
 package imagefilter
 
@@ -7,10 +7,10 @@ import (
 	"simd/archsimd"
 )
 
-func resizeBackendName() string { return "go_simd" }
+func resizeBackendName() string { return planarBackendName() }
 
 // The Go 1.27 experiment uses the same guarded coefficients and arithmetic as
-// the stable SIMD backend. It is opt-in and never adds a CGO call per pixel.
+// the scalar backend. Unsupported amd64 CPUs retain the scalar row kernel.
 func (p *resamplePlan) renderSIMDRow(row int) {
 	k := p.kernel
 	for x := range p.target.Bounds().Dx() {
@@ -31,7 +31,7 @@ func filterGoSIMD(src, dst []byte, source, step int, coefficients []int32) {
 		pixel := src[source+k*step:][:4]
 		packed := archsimd.BroadcastUint32x4(binary.LittleEndian.Uint32(pixel)).ReshapeToUint8s()
 		channels := packed.ExtendLo8ToUint16().ExtendLo4ToUint32().BitsToInt32()
-		sum = channels.MulAdd(archsimd.BroadcastInt32x4(coefficient), sum)
+		sum = channels.Mul(archsimd.BroadcastInt32x4(coefficient)).Add(sum)
 	}
 	dst[0] = filteredByte(int(sum.GetElem(0)))
 	dst[1] = filteredByte(int(sum.GetElem(1)))

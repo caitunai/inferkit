@@ -57,12 +57,14 @@ atlas migrate apply --env local --baseline 20261104100407
 | `id`、`created_at`、`updated_at` | 记录标识与时间 |
 | `url`、`url_sha256` | 调用方提供的来源 URL 及其哈希 |
 | `sha256` | 实际检测的原始图片字节 SHA-256 |
-| `model_sha256` | 进程已加载模型的 SHA-256，区分模型版本 |
+| `model_sha256` | 默认 libvips 路径为模型 SHA-256；显式 Go 比较路径使用模型与预处理 profile 的组合摘要，区分检测身份 |
 | `label`、`confidence` | 不可变的模型预测及获胜类别概率 |
 | `correction` | 独立人工标签；空字符串表示未标注 |
 | `reviewer`、`reviewed_at`、`revision` | 管理员用户名、标注时间（Unix 毫秒）、并发修改版本号 |
 
 每个 `(URL 哈希, 图片内容哈希, 模型哈希)` 组合只保存一次，重复调用或命中推理缓存仍会执行一次幂等插入，保证采集不受缓存影响。重复插入保留首次预测，不覆盖已有人工标签。相同 URL 的图片内容或模型版本变化时会产生新记录。
+
+通过 CLI 参数或 API 路径选择后端时，每个请求都携带独立的检测身份，避免两条路径的不同预测被合并；两个后端的启动日志 `prediction_sha256` 对应表中身份，`model_sha256` 对应实际 ONNX 文件摘要，组合规则见[图片预处理后端对比](IMAGE_PREPROCESS_BACKENDS.md)。
 
 上传文件与 URL 同时提交时，继续使用**上传文件的字节**进行检测和哈希计算，URL 仅为来源标识，不会为推理再次下载。仅提交 URL 时下载一次并复用该次推理结果入库。
 

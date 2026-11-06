@@ -1,4 +1,5 @@
 import { imageURL } from "../shared/image.js";
+import { detectionRoute } from "./routes.js";
 export { imageURL, percent } from "../shared/image.js";
 
 export const HISTORY_KEY = "inferkit.image-filter.history.v1";
@@ -36,6 +37,7 @@ export function normalizeEntry(value) {
     && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(value.thumbnail) ? value.thumbnail : "";
   return {
     id: value.id, time: value.time, duration: Math.max(0, value.duration), kind: value.kind,
+    backend: detectionRoute(value.backend).id,
     name: String(value.name || "图片").slice(0, 512), sourceURL, thumbnail,
     result: value.result ? readResult(value.result) : null,
     error: value.result ? "" : String(value.error || "检测失败").slice(0, 500),

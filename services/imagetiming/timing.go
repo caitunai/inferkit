@@ -12,7 +12,8 @@ import (
 // Stage identifies a fixed pipeline step, never a user-supplied label.
 type Stage uint8
 
-// Preprocess contains Convert, Resize and Tensor; other steps are exclusive.
+// Preprocess contains native or Go image preparation and Tensor. NativePipeline
+// contains NativeHeader, NativePrepare, NativeEval and NativeCleanup.
 const (
 	Admission Stage = iota
 	HTTPParse
@@ -24,6 +25,10 @@ const (
 	Decode
 	Preprocess
 	NativePipeline
+	NativeHeader
+	NativePrepare
+	NativeEval
+	NativeCleanup
 	Convert
 	Resize
 	Premultiply
@@ -42,7 +47,7 @@ const (
 
 var stageNames = [stageCount]string{
 	"admission", "http_parse", "source_read", "hash", "cache_lookup", "cache_wait", "slot_wait",
-	"decode", "preprocess", "native_pipeline", "convert", "resize", "premultiply", "resize_horizontal", "resize_vertical", "unpremultiply", "tensor", "inference", "result", "cache_store", "persist", "http_response", "http_cleanup",
+	"decode", "preprocess", "native_pipeline", "native_header", "native_prepare", "native_eval", "native_cleanup", "convert", "resize", "premultiply", "resize_horizontal", "resize_vertical", "unpremultiply", "tensor", "inference", "result", "cache_store", "persist", "http_response", "http_cleanup",
 }
 
 type contextKey struct{}
@@ -60,8 +65,13 @@ type Trace struct {
 	provider      string
 	decoder       string
 	resizeBackend string
+	jpegLoader    string
+	preprocessor  string
+	profile       string
+	tensorBackend string
 	durations     [stageCount]time.Duration
 	seen          [stageCount]bool
+	jpegMultiscan bool
 	bytes         int
 	width         int
 	height        int
@@ -70,6 +80,10 @@ type Trace struct {
 	workers       int
 	threads       int
 	resizeWorkers int
+	jpegShrink    int
+	jpegWidth     int
+	jpegHeight    int
+	jpegBuilds    int
 	attempt       uint64
 	mu            sync.Mutex
 }
@@ -146,6 +160,32 @@ func (t *Trace) Execution(provider string) { t.mu.Lock(); defer t.mu.Unlock(); t
 // Decoder records the actual decoder, including fallback to Go.
 func (t *Trace) Decoder(decoder string) { t.mu.Lock(); defer t.mu.Unlock(); t.decoder = decoder }
 
+// Preprocessing identifies the selected path even for cache hits.
+func (t *Trace) Preprocessing(backend, profile, tensor string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.preprocessor, t.profile, t.tensorBackend = backend, profile, tensor
+}
+
+// Native records measured C stages. Deferred image work can occur in Prepare or Eval.
+func (t *Trace) Native(header, prepare, eval, cleanup time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for offset, duration := range [...]time.Duration{header, prepare, eval, cleanup} {
+		stage := int(NativeHeader) + offset
+		t.durations[stage] += duration
+		t.seen[stage] = true
+	}
+}
+
+// JPEG records the last observed loader's shrink and output dimensions, never a prediction.
+func (t *Trace) JPEG(loader string, shrink, width, height, builds int, multiscan bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.jpegLoader, t.jpegShrink, t.jpegWidth, t.jpegHeight = loader, shrink, width, height
+	t.jpegBuilds, t.jpegMultiscan = builds, multiscan
+}
+
 // Attempt records a session-wide inference invocation number, not a cache hit.
 func (t *Trace) Attempt(number uint64) {
 	t.mu.Lock()
@@ -205,6 +245,12 @@ func (t *Trace) Finish(ctx context.Context, success bool, status int) {
 		Str("execution_provider", t.provider).Str("decode_backend", t.decoder).Str("resize_backend", t.resizeBackend).Str("pixel_type", t.pixels).Str("image_format", t.format).Uint64("inference_attempt", t.attempt).Int("resize_workers", t.resizeWorkers).
 		Int("active_requests", t.active).Int("max_requests", t.capacity).
 		Int("image_concurrency", t.workers).Int("threads", t.threads)
+	event = event.Str("preprocess_backend", t.preprocessor).Str("preprocess_profile", t.profile).Str("tensor_backend", t.tensorBackend)
+	if t.jpegLoader != "" {
+		event = event.Str("jpeg_loader", t.jpegLoader).Int("jpeg_shrink_on_load", t.jpegShrink).
+			Int("jpeg_decode_width", t.jpegWidth).Int("jpeg_decode_height", t.jpegHeight).
+			Int("jpeg_loader_builds", t.jpegBuilds).Bool("jpeg_multiscan", t.jpegMultiscan)
+	}
 	for stage, duration := range t.durations {
 		if t.seen[stage] {
 			event = event.Float64(stageNames[stage]+"_ms", milliseconds(duration))

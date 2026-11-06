@@ -14,20 +14,20 @@ import (
 	"github.com/rs/zerolog/log"
 	ort "github.com/yalue/onnxruntime_go"
 
-	"github.com/caitun/inferkit/services/imagepipeline"
 	"github.com/caitun/inferkit/services/imagetiming"
 	"github.com/caitun/inferkit/services/resource"
 )
 
 // Result retains model label order and the caller's optional source URL.
 type Result struct {
-	URL           string    `json:"url,omitempty"`
-	SHA256        string    `json:"sha256"`
-	Label         string    `json:"label"`
-	Labels        []string  `json:"labels"`
-	Probabilities []float32 `json:"probabilities"`
-	ClassID       int       `json:"class_id"`
-	Confidence    float32   `json:"confidence"`
+	PredictionSHA256 string    `json:"-"`
+	URL              string    `json:"url,omitempty"`
+	SHA256           string    `json:"sha256"`
+	Label            string    `json:"label"`
+	Labels           []string  `json:"labels"`
+	Probabilities    []float32 `json:"probabilities"`
+	ClassID          int       `json:"class_id"`
+	Confidence       float32   `json:"confidence"`
 }
 
 // Service owns a single model session. Call Close after stopping HTTP ingress.
@@ -60,21 +60,23 @@ func newWithPlan(c Config, plan executionPlan) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = imagepipeline.Available(); err != nil {
-		return nil, errors.Join(ErrConfig, err)
-	}
-	if m.Preprocessing.Version != imagepipeline.Version() {
-		return nil, errors.Join(ErrModel, &imagepipeline.VersionError{Expected: m.Preprocessing.Version, Actual: imagepipeline.Version()})
+	if err = validatePreprocessor(m); err != nil {
+		return nil, err
 	}
 	e, err := newEngine(c, plan, m, data)
 	if err != nil {
 		return nil, err
 	}
-	log.Info().Str("preprocess_profile", imagepipeline.Profile).Str("libvips_version", imagepipeline.Version()).Str("avif_decoder", "dav1d").Str("jpeg_library", imagepipeline.JPEGLibrary()).Str("resize_backend", "libvips").Str("tensor_backend", planarBackendName()).Str("image_decoder", "libvips").Str("execution_provider", e.provider).Str("coreml_compute_units", c.CoreMLComputeUnits).Int("cpus", plan.cpus).Int64("memory_bytes", plan.memory).Int("threads", plan.threads).Int("image_concurrency", plan.concurrency).Int("max_requests", plan.requests).Int("intra_spin_us", plan.spinMicros).Int("dynamic_block_base", plan.dynamicBlockBase).Bool("cache_bypass", c.BypassCache).Int("cache_entries", c.CacheEntries).Str("model_sha256", m.SHA256).Str("onnxruntime_version", ort.GetVersion()).Msg("image filter automatic resource plan")
-	return &Service{
+	service := &Service{
 		engine: e, http: newDownloader(c, plan), config: c, plan: plan, labels: slices.Clone(m.Labels), modelSHA256: m.SHA256,
 		requests: make(chan struct{}, plan.requests), cache: newResultStore(c),
-	}, nil
+	}
+	for _, backend := range []Backend{Libvips, Go} {
+		event := log.Info()
+		backend.logPreprocessor(event)
+		event.Str("model_preprocess_profile", m.Preprocessing.Profile).Str("prediction_sha256", service.WithBackend(backend).PredictionSHA256()).Str("execution_provider", e.provider).Str("coreml_compute_units", c.CoreMLComputeUnits).Int("cpus", plan.cpus).Int64("memory_bytes", plan.memory).Int("threads", plan.threads).Int("image_concurrency", plan.concurrency).Int("max_requests", plan.requests).Int("intra_spin_us", plan.spinMicros).Int("dynamic_block_base", plan.dynamicBlockBase).Bool("cache_bypass", c.BypassCache).Int("cache_entries", c.CacheEntries).Str("model_sha256", m.SHA256).Str("onnxruntime_version", ort.GetVersion()).Msg("image filter automatic resource plan")
+	}
+	return service, nil
 }
 
 // ModelSHA256 identifies the loaded model without rereading its deployment files.
@@ -115,12 +117,22 @@ func (s *Service) admit() error {
 
 // Check prefers file bytes, hashes the actual content, and coalesces identical in-flight images.
 // A canceled owner fails its shared attempt; waiting callers may retry independently.
-func (s *Service) Check(ctx context.Context, src Source) (result Result, returnErr error) {
+func (s *Service) Check(ctx context.Context, src Source) (Result, error) {
+	return s.WithBackend(Libvips).Check(ctx, src)
+}
+
+// Check uses this adapter's backend and the service's shared admission budget.
+func (d Detector) Check(ctx context.Context, src Source) (result Result, returnErr error) {
+	if _, err := ParseBackend(string(d.backend)); err != nil {
+		return Result{}, err
+	}
+	s := d.service
 	ctx, trace, owner := imagetiming.Ensure(ctx)
 	if owner {
 		defer func() { trace.Finish(ctx, returnErr == nil, 0) }()
 	}
 	trace.Input(sourceKind(src), 0)
+	trace.Preprocessing(string(d.backend), d.backend.preprocessProfile(), d.backend.tensorBackend())
 	done := imagetiming.Measure(ctx, imagetiming.Admission)
 	err := s.admit()
 	done(err)
@@ -131,10 +143,11 @@ func (s *Service) Check(ctx context.Context, src Source) (result Result, returnE
 	defer func() { <-s.requests; s.active.Done() }()
 	ctx, cancel := context.WithTimeout(ctx, s.config.Timeout)
 	defer cancel()
-	return s.checkSource(ctx, src)
+	return d.checkSource(ctx, src)
 }
 
-func (s *Service) checkSource(ctx context.Context, src Source) (Result, error) {
+func (d Detector) checkSource(ctx context.Context, src Source) (Result, error) {
+	s := d.service
 	data, err := s.readSource(ctx, src)
 	if err != nil {
 		return Result{}, err
@@ -147,7 +160,7 @@ func (s *Service) checkSource(ctx context.Context, src Source) (Result, error) {
 	hash := sha256.Sum256(data)
 	key := hex.EncodeToString(hash[:])
 	done(nil)
-	result, err := s.checkContent(ctx, key, data)
+	result, err := d.checkContent(ctx, key, data)
 	if err != nil {
 		return Result{}, err
 	}
@@ -157,14 +170,16 @@ func (s *Service) checkSource(ctx context.Context, src Source) (Result, error) {
 	return result, nil
 }
 
-func (s *Service) checkContent(ctx context.Context, key string, data []byte) (Result, error) {
+func (d Detector) checkContent(ctx context.Context, key string, data []byte) (Result, error) {
+	s := d.service
 	trace := imagetiming.From(ctx)
 	if s.config.BypassCache {
 		trace.Cache("bypass")
-		return s.classify(ctx, key, data)
+		return d.classify(ctx, key, data)
 	}
 	done := imagetiming.Measure(ctx, imagetiming.CacheLookup)
-	result, call, owner := s.cache.begin(key)
+	cacheKey := d.backend.cacheKey(key)
+	result, call, owner := s.cache.begin(cacheKey)
 	done(nil)
 	if call == nil {
 		trace.Cache("hit")
@@ -175,16 +190,17 @@ func (s *Service) checkContent(ctx context.Context, key string, data []byte) (Re
 		return awaitResult(ctx, call)
 	}
 	trace.Cache("miss")
-	result, err := s.classify(ctx, key, data)
+	result, err := d.classify(ctx, key, data)
 	done = imagetiming.Measure(ctx, imagetiming.CacheStore)
-	s.cache.finish(key, call, result, err)
+	s.cache.finish(cacheKey, call, result, err)
 	done(nil)
 	return result, err
 }
 
-func (s *Service) classify(ctx context.Context, key string, data []byte) (Result, error) {
-	result, err := s.infer(ctx, data)
+func (d Detector) classify(ctx context.Context, key string, data []byte) (Result, error) {
+	result, err := d.infer(ctx, data)
 	result.SHA256 = key
+	result.PredictionSHA256 = d.PredictionSHA256()
 	return result, err
 }
 
@@ -199,7 +215,8 @@ func awaitResult(ctx context.Context, call *pendingCall) (result Result, returnE
 	}
 }
 
-func (s *Service) infer(ctx context.Context, data []byte) (Result, error) {
+func (d Detector) infer(ctx context.Context, data []byte) (Result, error) {
+	s := d.service
 	done := imagetiming.Measure(ctx, imagetiming.SlotWait)
 	select {
 	case <-ctx.Done():
@@ -208,7 +225,7 @@ func (s *Service) infer(ctx context.Context, data []byte) (Result, error) {
 	case slot := <-s.engine.slots:
 		done(nil)
 		defer func() { s.engine.slots <- slot }()
-		if err := preprocess(ctx, data, s.config.MaxPixels, slot.input.GetData()); err != nil {
+		if err := d.prepare(ctx, data, slot.input.GetData()); err != nil {
 			return Result{}, errors.Join(ErrPreprocess, err)
 		}
 		done = imagetiming.Measure(ctx, imagetiming.Inference)
