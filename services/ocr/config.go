@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	cpuProvider    = "cpu"
-	coreMLProvider = "coreml"
+	cpuProvider      = "cpu"
+	openVINOProvider = "openvino"
+	coreMLProvider   = "coreml"
 )
 
 var (

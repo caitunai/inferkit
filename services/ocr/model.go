@@ -73,10 +73,10 @@ type model struct {
 }
 
 type modelSettings struct {
-	backend        onnx.Backend
 	path, pin      string
 	role           string
 	input, output  ort.Shape
+	backend        onnx.Backend
 	threads, slots int
 	cache          bool
 }

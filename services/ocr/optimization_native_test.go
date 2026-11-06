@@ -6,12 +6,30 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/caitun/inferkit/services/imageinput"
+	"github.com/caitun/inferkit/services/onnx"
 	ort "github.com/yalue/onnxruntime_go"
 )
+
+func TestNativeOpenVINOFailureKeepsCPUSession(t *testing.T) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		t.Skip("this test exercises unsupported-host startup failure")
+	}
+	c, dir := nativeConfiguration(t)
+	cpu := newNativeService(t, c)
+	c.DetectionProvider = openVINOProvider
+	if _, err := NewContext(t.Context(), c); !errors.Is(err, onnx.ErrOpenVINO) {
+		t.Fatalf("explicit OpenVINO did not report unsupported host: %v", err)
+	}
+	data := nativeRead(t, dir, "sample.png")
+	if _, err := cpu.Recognize(t.Context(), imageinput.Source{Reader: bytes.NewReader(data)}); err != nil {
+		t.Fatal("failed OpenVINO startup released another service's environment", err)
+	}
+}
 
 func TestNativeBatchAndBufferReuse(t *testing.T) {
 	c, dir := nativeConfiguration(t)

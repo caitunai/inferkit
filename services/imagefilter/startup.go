@@ -15,7 +15,7 @@ import (
 const warmupTimeout = 30 * time.Second
 
 func (e *engine) createSession(c Config, plan executionPlan, m *manifest, data []byte) error {
-	backend := onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits}
+	backend := onnx.Backend{Provider: c.Provider, ComputeUnits: c.CoreMLComputeUnits, Threads: plan.cpus, Streams: plan.concurrency}
 	start := time.Now()
 	managed, err := backend.Open(data, []string{m.Input.Name}, []string{m.Output.Name}, c.CoreMLCache, func(options *ort.SessionOptions) error { return configureSession(options, plan) })
 	if err != nil {

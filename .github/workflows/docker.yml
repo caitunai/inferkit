@@ -107,8 +107,18 @@ jobs:
             case "$dependencies" in *"not found"*) printf "%s\n" "$dependencies"; exit 1;; esac
             /usr/local/bin/inferkit --help >/dev/null
           '
-      - name: Verify real small OCR before publishing
-        run: python3 scripts/test-inference-image.py inferkit:ci
+      - name: Verify real small OCR with CPU and OpenVINO FP32 before publishing
+        run: |
+          # Standard hosted x64 runners may expose either Intel or AMD CPUs.
+          # This Intel plugin only enumerates Intel hardware; never disguise a
+          # failed Intel execution as an optional or successful CPU fallback.
+          if grep -Eq '^vendor_id[[:space:]]*: GenuineIntel$' /proc/cpuinfo \
+             && grep -Eq '^flags[[:space:]]*:.*[[:space:]]avx2([[:space:]]|$)' /proc/cpuinfo; then
+            python3 scripts/test-inference-image.py inferkit:ci --with-openvino
+          else
+            echo '::notice::OpenVINO execution requires an Intel AVX2 runner; verifying CPU OCR and bundled OpenVINO ELF dependencies only on this host'
+            python3 scripts/test-inference-image.py inferkit:ci
+          fi
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v4

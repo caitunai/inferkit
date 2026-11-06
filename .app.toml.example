@@ -166,6 +166,8 @@ password="replace-with-at-least-16-random-characters"
 
 [image.ocr]
 # cpu 保持现有结果；auto 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。
+# Debian 13 amd64 image + Intel AVX2: explicit "openvino" selects CPU FP32.
+# OpenVINO is opt-in; auto keeps its existing platform selection.
 provider="cpu"
 # Empty inherits provider. On macOS ARM, compare detectionProvider="auto" and recognitionProvider="cpu".
 detectionProvider=""

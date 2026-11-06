@@ -20,9 +20,11 @@ var (
 )
 
 var environment struct {
-	library string
-	mu      sync.Mutex
-	users   int
+	library          string
+	openvino         []ort.EpDevice
+	mu               sync.Mutex
+	users            int
+	pluginRegistered bool
 }
 
 // Lease keeps the native environment alive until Close is called.
@@ -71,7 +73,14 @@ func release() error {
 	if environment.users > 0 {
 		return nil
 	}
-	if err := ort.DestroyEnvironment(); err != nil {
+	var pluginErr error
+	if environment.pluginRegistered {
+		pluginErr = ort.UnregisterExecutionProviderLibrary(openVINORegistration)
+		environment.pluginRegistered = false
+		environment.openvino = nil
+	}
+	environment.library = ""
+	if err := errors.Join(pluginErr, ort.DestroyEnvironment()); err != nil {
 		return errors.Join(ErrRuntime, err)
 	}
 	return nil

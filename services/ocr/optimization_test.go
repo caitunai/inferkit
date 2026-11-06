@@ -36,6 +36,22 @@ func TestModelSizeAndIndependentProviders(t *testing.T) {
 	}
 }
 
+func TestOpenVINOIndependentStageSelection(t *testing.T) {
+	t.Parallel()
+	for _, providers := range [][2]string{{cpuProvider, openVINOProvider}, {openVINOProvider, cpuProvider}, {openVINOProvider, openVINOProvider}} {
+		v := viper.New()
+		v.Set("image.ocr.detectionProvider", providers[0])
+		v.Set("image.ocr.recognitionProvider", providers[1])
+		c := Configuration(v)
+		if err := c.validate(); err != nil {
+			t.Fatal(err)
+		}
+		if c.DetectionProvider != providers[0] || c.RecognitionProvider != providers[1] {
+			t.Fatal("independent OpenVINO provider selection lost")
+		}
+	}
+}
+
 func TestSIMDProbabilitySemantics(t *testing.T) {
 	t.Parallel()
 	for _, length := range []int{0, 1, 3, 4, 5, 17, 18710} {

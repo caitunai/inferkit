@@ -18,7 +18,7 @@ type lineBatch struct {
 
 func (s *Service) batches(boxes []Box) ([]lineBatch, error) {
 	size := s.batchLimit()
-	if s.recognizer.provider == cpuProvider {
+	if s.recognizer.provider == cpuProvider || s.recognizer.provider == openVINOProvider {
 		// Keep enough CPU jobs runnable before grouping lines into larger GEMMs.
 		size = min(size, max(1, len(boxes)/s.plan.lineWorkers))
 	}

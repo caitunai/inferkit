@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	providerCPU    = "cpu"
-	providerCoreML = "coreml"
-	providerAuto   = "auto"
-	platformDarwin = "darwin"
-	computeAll     = "ALL"
+	providerCPU      = "cpu"
+	providerCoreML   = "coreml"
+	providerOpenVINO = "openvino"
+	providerAuto     = "auto"
+	platformDarwin   = "darwin"
+	computeAll       = "ALL"
 )
 
 // Backend selects an execution provider. The zero value preserves CPU execution.
@@ -22,11 +23,16 @@ type Backend struct {
 	Provider       string
 	ComputeUnits   string
 	CacheDirectory string
+	Threads        int
+	Streams        int
 }
 
-// Validate rejects unknown providers and CoreML options before loading a model.
+// Validate rejects unknown providers, CoreML options and invalid OpenVINO budgets.
 func (b Backend) Validate() error {
-	if !slices.Contains([]string{"", providerCPU, providerAuto, providerCoreML}, b.Provider) ||
+	if b.Provider == providerOpenVINO && (b.Threads < 0 || b.Streams < 0 || b.Streams > max(1, b.Threads)) {
+		return ErrConfig
+	}
+	if !slices.Contains([]string{"", providerCPU, providerAuto, providerCoreML, providerOpenVINO}, b.Provider) ||
 		!slices.Contains([]string{"", computeAll, "CPUOnly", "CPUAndGPU", "CPUAndNeuralEngine"}, b.ComputeUnits) {
 		return ErrConfig
 	}
@@ -35,14 +41,17 @@ func (b Backend) Validate() error {
 
 // PreferredProvider resolves platform selection before any initialization fallback.
 func (b Backend) PreferredProvider() string {
+	if b.Provider == providerOpenVINO {
+		return providerOpenVINO
+	}
 	if b.Provider == providerCoreML || b.Provider == providerAuto && runtime.GOOS == platformDarwin && runtime.GOARCH == "arm64" {
 		return providerCoreML
 	}
 	return providerCPU
 }
 
-// Create registers the selected EP; ORT retains CPU execution for unsupported
-// nodes. Only auto retries failed initialization, using fresh CPU options.
+// Create registers the selected EP. CoreML permits CPU nodes; explicit OpenVINO
+// requires EP assignment. Only auto retries initialization with fresh CPU options.
 func (b Backend) Create(data []byte, inputs, outputs []string, configure func(*ort.SessionOptions) error) (*ort.DynamicAdvancedSession, string, error) {
 	if err := b.Validate(); err != nil {
 		return nil, "", err
@@ -71,8 +80,8 @@ func (b Backend) create(data []byte, inputs, outputs []string, configure func(*o
 			}
 		}
 	}()
-	if err = configure(options); err == nil && provider == providerCoreML {
-		err = b.appendCoreML(options)
+	if err = configure(options); err == nil {
+		err = b.appendProvider(options, provider)
 	}
 	if err != nil {
 		return nil, errors.Join(ErrRuntime, err)
@@ -82,6 +91,17 @@ func (b Backend) create(data []byte, inputs, outputs []string, configure func(*o
 		return nil, errors.Join(ErrRuntime, err)
 	}
 	return session, nil
+}
+
+func (b Backend) appendProvider(options *ort.SessionOptions, provider string) error {
+	switch provider {
+	case providerCoreML:
+		return b.appendCoreML(options)
+	case providerOpenVINO:
+		return b.appendOpenVINO(options)
+	default:
+		return nil
+	}
 }
 
 func (b Backend) appendCoreML(options *ort.SessionOptions) error {

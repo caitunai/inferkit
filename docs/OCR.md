@@ -227,7 +227,7 @@ OCR_TEST_DIR=/absolute/path/to/ocr-models \
 
 ```toml
 [image.ocr]
-provider="auto" # 兼容的共同默认：auto / cpu / coreml。
+provider="auto" # 共同默认：auto / cpu / coreml / openvino。
 detectionProvider="auto"
 recognitionProvider="cpu"
 modelSize="medium" # 或 small；显式模型路径和 pin 仍优先。
@@ -237,6 +237,29 @@ coremlCache=true
 ```
 
 `detectionProvider`、`recognitionProvider` 为空或未设置时，各自继承原 `provider`，不改变已有部署选择。显式值优先；`auto` 在 macOS ARM 尝试 CoreML，其他平台使用 CPU。启动日志记录实际 provider，而非配置推测值。M2 Pro 对照中检测使用 CoreML、识别使用 CPU 更快，Debian CPU 服务器仍需本机验证。
+
+### OpenVINO CPU FP32
+
+`openvino` 是显式 provider，支持 Debian 13 Linux amd64 镜像中的 Intel AVX2 CPU。macOS 保持原来的 CPU/CoreML 实现；在 macOS 显式选择 OpenVINO 会返回可分类错误，不静默改用 CPU。`auto` 不自动切换为 OpenVINO。
+
+```toml
+[image.ocr]
+enabled=true
+modelSize="small"
+provider="cpu"
+detectionProvider="openvino"
+recognitionProvider="openvino"
+```
+
+继续使用配套的 ONNX 检测、识别模型和字典，不需要转为 OpenVINO IR。检测和识别可独立切换，建议与 `cpu/cpu`、`openvino/cpu`、`cpu/openvino`、`openvino/openvino` 对比。
+
+插件通过现有 Go 绑定的动态 EP API 注册，固定为 CPU `INFERENCE_PRECISION_HINT=f32`，不使用 AUTO/GPU/NPU，也不自动量化。检测采用总 CPU 预算和单 stream；识别采用行 worker 数量的 stream、总计 `lineWorkers × recognitionThreads` 的线程预算，避免把多个并发识别都配置成使用整机线程。CPU 与 OpenVINO 的组批规则一致。检测/识别各自仍持有现有 CPU 令牌，取消、有限预热、张量复用和文本顺序保持原有生命周期。
+
+显式 OpenVINO 会禁止默认 CPU EP 接管不支持的计算节点；插件加载、设备枚举或模型编译失败会终止该服务初始化。这样不会出现日志写着 OpenVINO、模型实际全部退回 CPU 的情况。回退部署时将相应阶段改回 `cpu` 并重建容器。原有 CPU/CoreML 设置和回退行为保持不变。
+
+插件按 ONNX 环境按需注册，多模型共享；只有全部服务会话和张量池关闭、最后一个环境租约释放后才注销。启动日志包括 `OpenVINO CPU plugin registered`、`OpenVINO CPU session configured`、`precision=fp32`、`openvino_threads`、`openvino_streams`，模型和每请求日志的实际 provider 为 `openvino`。现有 `coremlCache` 只管理 CoreML，不是 OpenVINO 编译缓存。
+
+默认插件为 `/opt/openvino/lib/libonnxruntime_providers_openvino_plugin.so`。离线自备运行库可通过进程环境变量 `INFERKIT_OPENVINO_LIBRARY` 指定同版本 CPU-only 插件；当前 Go 绑定不公开设备元数据，因此多个 OpenVINO 物理设备时会拒绝初始化。镜像仅包含 CPU 插件，避免设备选择歧义。[插件官方用法](https://github.com/onnxruntime/onnxruntime-ep-openvino/blob/main/docs/QuickStart.md)
 
 两个模型分别使用共享 ONNX 包的受管会话。编译缓存按实际模型内容、ORT 版本、系统构建/架构、CPU 型号和 EP 选项隔离，使用系统用户缓存目录。与图片分类共享最多 8 个目录、30 天闲置淘汰的管理规则；活跃目录持有租约，初始化时有界清理。缓存不可用时无缓存创建；缓存加载失败先重试无缓存 CoreML，`auto` 此后才可回退 CPU。CPU 模型不获取 CoreML 缓存。缓存没有识别文本或图片。[缓存规则](ONNX_DEPLOYMENT.md#图片检测启动与推理资源)
 

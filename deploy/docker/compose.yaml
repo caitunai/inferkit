@@ -2,6 +2,10 @@ services:
   inferkit:
     image: ${INFERKIT_IMAGE:?Set INFERKIT_IMAGE to the container image name}
     platform: linux/amd64
+    # Image UID 10001 is mapped to a subordinate host UID in rootless Docker.
+    # Grant bind-mount read access as described in docs/DOCKER_DEPLOYMENT.md.
+    # One process loads both models and exposes both APIs on the same port.
+    command: ["--config", "/etc/inferkit/app.toml", "serve"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:${INFERKIT_PORT:-8081}:8080"
@@ -20,6 +24,12 @@ services:
         read_only: true
         bind:
           create_host_path: false
+      - type: bind
+        source: ${INFERKIT_OCR_MODEL:-./pp-ocrv6-medium}
+        target: /models/ocr
+        read_only: true
+        bind:
+          create_host_path: false
       - inferkit-data:/var/lib/inferkit
     read_only: true
     tmpfs:
@@ -27,6 +37,16 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl --fail --silent --show-error --max-time 3 --output /dev/null "http://127.0.0.1:$${PORT}/image-filter" &&
+          curl --fail --silent --show-error --max-time 3 --output /dev/null "http://127.0.0.1:$${PORT}/ocr"
+      interval: 30s
+      timeout: 8s
+      start_period: 90s
+      retries: 3
 
 volumes:
   inferkit-data:

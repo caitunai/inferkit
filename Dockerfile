@@ -16,10 +16,12 @@ FROM debian:trixie-slim AS onnxruntime
 ARG TARGETARCH
 RUN test "$TARGETARCH" = amd64 \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl python3 \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/prepare-onnxruntime-linux.sh /tmp/prepare-onnxruntime-linux.sh
 RUN bash /tmp/prepare-onnxruntime-linux.sh /opt/onnxruntime
+COPY scripts/prepare-openvino-linux.py /tmp/prepare-openvino-linux.py
+RUN python3 /tmp/prepare-openvino-linux.py /opt/openvino
 
 FROM golang:1.27-trixie AS build
 ARG WITH_VIPS
@@ -71,11 +73,13 @@ RUN test "$TARGETARCH" = amd64 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=onnxruntime /opt/onnxruntime/lib/ /opt/onnxruntime/lib/
 COPY --from=onnxruntime /opt/onnxruntime/LICENSE /opt/onnxruntime/ThirdPartyNotices.txt /usr/share/doc/onnxruntime/
+COPY --from=onnxruntime /opt/openvino/ /opt/openvino/
+COPY deploy/licenses/openvino-ep-LICENSE.txt /opt/openvino/licenses/LICENSE
 COPY --from=build --chmod=0555 /out/inferkit /usr/local/bin/inferkit
 # Includes libdav1d.so* and libheif.so*; LD_LIBRARY_PATH below resolves them.
 COPY --from=build /opt/inferkit-image/ /opt/inferkit-image/
 COPY deploy/licenses/png-LICENSE.txt deploy/licenses/libvips-LICENSE.txt /usr/share/doc/inferkit/
-ENV HOME=/var/lib/inferkit LANG=en_US.UTF-8 PORT=8080 LD_LIBRARY_PATH=/opt/onnxruntime/lib:/opt/inferkit-image/lib
+ENV HOME=/var/lib/inferkit LANG=en_US.UTF-8 PORT=8080 LD_LIBRARY_PATH=/opt/onnxruntime/lib:/opt/inferkit-image/lib:/opt/openvino/lib
 WORKDIR /var/lib/inferkit
 USER 10001:10001
 EXPOSE 8080
@@ -98,6 +102,10 @@ RUN ONNXRUNTIME_SHARED_LIBRARY_PATH=/opt/onnxruntime/lib/libonnxruntime.so.1 \
          -test.run='^(TestSIMDProbabilitySemantics|TestCTCBlankRepeatsAndInvalidOutput|TestEqualWidthBatchingAndPixelContract|TestBatchCTCOrderAndInvalidRows)$' \
     && GODEBUG=cpu.avx=off /tmp/verify/bin/ocr.test -test.v \
          -test.run='^(TestSIMDProbabilitySemantics|TestCTCBlankRepeatsAndInvalidOutput)$' \
+    && for library in /opt/openvino/lib/*.so*; do \
+         dependencies=$(ldd "$library") || exit 1; \
+         case "$dependencies" in *"not found"*) printf '%s\n' "$dependencies"; exit 1;; esac; \
+       done \
     && if [ "$WITH_VIPS" = true ]; then \
          /tmp/verify/bin/imagepipeline.test -test.v \
            -test.run='^(TestNativeFormatsAndLimits|TestHighBitDepthAVIFMatchesTrainingPipeline|TestSmallAlphaAndCentering|TestJPEGObservedShrink|TestNativeParallelCancellationAndOwnership)$'; \

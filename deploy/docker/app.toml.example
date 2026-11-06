@@ -14,6 +14,13 @@ shutdownTimeout="30s"
 [storage]
 path="/var/lib/inferkit"
 
+[redis]
+# Required by the unified `serve` command. Use a container-reachable hostname.
+# Retain your existing Redis credentials, TLS and queue settings when migrating.
+host=""
+port="6379"
+db=0
+
 [auth.api]
 # Reuse existing values when migrating, so current API tokens remain valid.
 # For a new deployment, secret must contain at least 32 bytes.
@@ -41,9 +48,11 @@ cacheTTL="5m"
 enabled=false
 
 [image.ocr]
-# Requires compose.ocr.yaml and existing Redis/queue configuration for `serve`.
-enabled=false
+# The unified compose.yaml starts both image-filter and OCR in one process.
+enabled=true
 modelSize="medium" # Or small; mount the matching prepared directory at /models/ocr.
+# On Intel AVX2 servers, set either/both stage providers below to "openvino".
+# The Debian 13 image includes a CPU-only plugin; OpenVINO always uses FP32.
 provider="cpu"
 detectionProvider="cpu"
 recognitionProvider="cpu"

@@ -27,11 +27,13 @@ deploy/**
 !deploy/licenses/
 !deploy/licenses/png-LICENSE.txt
 !deploy/licenses/libvips-LICENSE.txt
+!deploy/licenses/openvino-ep-LICENSE.txt
 !scripts/
 scripts/**
 !scripts/prepare-onnxruntime-linux.sh
 !scripts/check-onnxruntime-api.sh
 !scripts/prepare-image-linux.sh
+!scripts/prepare-openvino-linux.py
 !storage/
 storage/**
 !storage/*.go

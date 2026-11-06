@@ -19,11 +19,11 @@ class VerificationError(ValueError):
     """The runtime returned an incomplete or incompatible inference result."""
 
 
-def configuration(models):
+def configuration(models, providers=("cpu", "cpu")):
     settings = [
         'mode="release"', '[logger]', 'level="info"', '[image.ocr]',
-        'modelSize="small"', 'provider="cpu"', 'detectionProvider="cpu"',
-        'recognitionProvider="cpu"', 'warmupRuns=3', 'coremlCache=true',
+        'modelSize="small"', 'provider="cpu"', f'detectionProvider="{providers[0]}"',
+        f'recognitionProvider="{providers[1]}"', 'warmupRuns=3', 'coremlCache=true',
         'recognitionBatchSize=4', 'library="/opt/onnxruntime/lib/libonnxruntime.so.1"',
     ]
     for name, filename in (("detection", "det.onnx"), ("recognition", "rec.onnx"), ("dictionary", "dict.txt")):
@@ -53,7 +53,7 @@ def log_events(stderr):
     return events
 
 
-def verify_output(stdout, stderr):
+def verify_output(stdout, stderr, providers=("cpu", "cpu")):
     results = [json.loads(line) for line in stdout.splitlines() if line.strip()]
     events = log_events(stderr)
     timings = [event for event in events if event.get("message") == "OCR timing"]
@@ -64,8 +64,8 @@ def verify_output(stdout, stderr):
         check((result["width"], result["height"]) == (320, 640), "text fixture dimensions changed")
     for result in results[2:]:
         check((result["width"], result["height"]) == (48, 32), "four-format fixture dimensions changed")
-    verify_timings(timings)
-    verify_startup(events)
+    verify_timings(timings, providers)
+    verify_startup(events, providers)
     return {
         "formats": list(FORMATS), "text_lines": len(results[0]["lines"]),
         "batches": timings[0]["recognition_batches"], "batch_max": timings[0]["recognition_batch_max"],
@@ -73,12 +73,12 @@ def verify_output(stdout, stderr):
     }
 
 
-def verify_timings(timings):
+def verify_timings(timings, providers=("cpu", "cpu")):
     expected = ("png", "png") + FORMATS
     for timing, format_name in zip(timings, expected):
         check(timing.get("success") is True and not timing.get("failed_stage"), "OCR stage failed")
         check(timing.get("image_format") == format_name, "wrong decoded image format")
-        check(timing.get("detection_provider") == timing.get("recognition_provider") == "cpu", "CPU provider selection ignored")
+        check((timing.get("detection_provider"), timing.get("recognition_provider")) == providers, "requested provider selection ignored")
         check(timing.get("tensor_backend") in ("go_simd", "go"), "unknown OCR kernel backend")
         check(timing.get("detection_inference_ms", 0) > 0, "missing real detection inference")
         if format_name in ("jpeg", "webp"):
@@ -90,13 +90,19 @@ def verify_timings(timings):
     check(timings[1].get("buffer_reused", 0) > 0, "repeated image did not reuse buffers")
 
 
-def verify_startup(events):
+def verify_startup(events, providers=("cpu", "cpu")):
     warmups = [event for event in events if event.get("message") == "OCR startup warmup complete"]
     check(len(warmups) == 1 and warmups[0].get("warmup_runs") == 3, "finite startup warmup inactive")
     models = [event for event in events if event.get("message") == "OCR model initialized"]
     check(len(models) == 2 and {event.get("stage") for event in models} == {"detection", "recognition"}, "missing model startup summaries")
+    expected = dict(zip(("detection", "recognition"), providers))
     for model in models:
-        check(model.get("execution_provider") == "cpu" and model.get("coreml_cache") is False, "CPU image attempted CoreML")
+        check(model.get("execution_provider") == expected[model["stage"]] and model.get("coreml_cache") is False, "wrong model provider or CoreML cache")
+    configured = [event for event in events if event.get("message") == "OpenVINO CPU session configured"]
+    check(len(configured) == providers.count("openvino"), "missing OpenVINO native session configuration")
+    for event in configured:
+        check(event.get("precision") == "fp32" and event.get("openvino_threads", 0) > 0
+              and 0 < event.get("openvino_streams", 0) <= event["openvino_threads"], "OpenVINO FP32/resource contract ignored")
 
 
 def container_command(image, models, config, name):
@@ -125,7 +131,38 @@ def run_container(image, models, config):
             raise VerificationError("cannot remove smoke-test container: " + cleanup.stderr)
 
 
-def run(image, supplied_models):
+def compare_results(baseline, current):
+    check(len(baseline) == len(current), "provider changed result count")
+    for expected, actual in zip(baseline, current):
+        check(expected["text"] == actual["text"], "provider changed recognized text")
+        check(len(expected["lines"]) == len(actual["lines"]), "provider changed text line count")
+        for left, right in zip(expected["lines"], actual["lines"]):
+            check(left["text"] == right["text"], "provider changed line order")
+            check(abs(left["confidence"] - right["confidence"]) <= 0.001, "provider confidence drift exceeds FP32 tolerance")
+            check(len(left["box"]) == len(right["box"]) == 4, "invalid text box")
+            for a, b in zip(left["box"], right["box"]):
+                check(abs(a["x"] - b["x"]) <= 1 and abs(a["y"] - b["y"]) <= 1, "provider changed text coordinates")
+
+
+def verify_variant(image, models, config, providers, baseline):
+    config.write_text(configuration(models, providers), encoding="utf-8")
+    config.chmod(0o444)  # No secrets; readable by the final non-root account.
+    result = run_container(image, models, config)
+    try:
+        check(result.returncode == 0, "container OCR command failed")
+        report = verify_output(result.stdout, result.stderr, providers)
+        results = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+        if baseline is not None:
+            compare_results(baseline, results)
+    except (KeyError, TypeError, ValueError):
+        sys.stderr.write(result.stderr)
+        raise
+    report.update(detection_provider=providers[0], recognition_provider=providers[1])
+    print("Inference image verified: " + json.dumps(report, sort_keys=True))
+    return results
+
+
+def run(image, supplied_models, with_openvino=False):
     with tempfile.TemporaryDirectory(prefix="inferkit-image-check-") as directory:
         work = Path(directory)
         models = supplied_models
@@ -133,28 +170,22 @@ def run(image, supplied_models):
             models = work / "models"
             subprocess.run(["bash", str(PROJECT / "scripts/prepare-ocr-models.sh"), "--size", "small", str(models)], check=True, timeout=900)
         config = work / "ocr-test.toml"
-        config.write_text(configuration(models), encoding="utf-8")
-        config.chmod(0o444)  # The config has no secrets; the image's UID must read it.
-        result = run_container(image, models, config)
-        if result.returncode:
-            sys.stderr.write(result.stderr)
-            raise VerificationError("container OCR command failed")
-        try:
-            report = verify_output(result.stdout, result.stderr)
-        except (KeyError, TypeError, ValueError):
-            sys.stderr.write(result.stderr)
-            raise
-        print("Inference image verified: " + json.dumps(report, sort_keys=True))
+        baseline = verify_variant(image, models, config, ("cpu", "cpu"), None)
+        if with_openvino:
+            for providers in (("openvino", "cpu"), ("cpu", "openvino"), ("openvino", "openvino")):
+                config.chmod(0o600)  # Rewrite only after the previous container exited.
+                verify_variant(image, models, config, providers, baseline)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", help="already-built Debian 13 amd64 image")
     parser.add_argument("--models", type=lambda value: Path(value).resolve(), help="prepared small model directory; skip downloading")
+    parser.add_argument("--with-openvino", action="store_true", help="also verify both OpenVINO FP32 stages and mixed providers against CPU")
     args = parser.parse_args()
     if args.image.startswith("-"):
         parser.error("invalid image name")
-    run(args.image, args.models)
+    run(args.image, args.models, args.with_openvino)
 
 
 if __name__ == "__main__":

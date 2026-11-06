@@ -1,6 +1,7 @@
 """Reject incomplete release checks without requiring Docker or model downloads."""
 
 import importlib.util
+import copy
 import io
 import json
 from pathlib import Path
@@ -21,7 +22,9 @@ def valid_records():
     for index, format_name in enumerate(("png", "png") + SMOKE.FORMATS):
         result = {"width": 48, "height": 32, "text": "", "lines": []}
         if index < 2:
-            result.update(width=320, height=640, text="OCR", lines=[{}] * 12)
+            line = {"text": "OCR", "confidence": 0.99,
+                    "box": [{"x": x, "y": y} for x, y in ((0, 0), (50, 0), (50, 20), (0, 20))]}
+            result.update(width=320, height=640, text="OCR", lines=[copy.deepcopy(line) for _ in range(12)])
         results.append(result)
         timings.append({
             "message": "OCR timing", "success": True, "failed_stage": "",
@@ -43,6 +46,43 @@ def serialize(records):
 
 
 class InferenceImageVerification(unittest.TestCase):
+    def test_openvino_stage_selection_and_fp32_are_required(self):
+        results, events = valid_records()
+        for event in events:
+            if event.get("stage") == "detection":
+                event["execution_provider"] = "openvino"
+            if event.get("message") == "OCR timing":
+                event["detection_provider"] = "openvino"
+        settings = {"message": "OpenVINO CPU session configured", "precision": "fp32",
+                    "openvino_threads": 2, "openvino_streams": 1}
+        events.append(settings)
+        SMOKE.verify_output(serialize(results), serialize(events), ("openvino", "cpu"))
+        for precision in ("bf16", "fp16", ""):
+            with self.subTest(precision=precision):
+                settings["precision"] = precision
+                with self.assertRaises(SMOKE.VerificationError):
+                    SMOKE.verify_output(serialize(results), serialize(events), ("openvino", "cpu"))
+
+    def test_requested_openvino_cannot_silently_pass_as_cpu(self):
+        results, events = valid_records()
+        with self.assertRaises(SMOKE.VerificationError):
+            SMOKE.verify_output(serialize(results), serialize(events), ("openvino", "openvino"))
+
+    def test_cross_provider_text_coordinates_and_confidence(self):
+        baseline, _events = valid_records()
+        current = copy.deepcopy(baseline)
+        SMOKE.compare_results(baseline, current)
+        for key, value in (("text", "wrong"), ("confidence", 0.8), ("box", [])):
+            with self.subTest(key=key):
+                current = copy.deepcopy(baseline)
+                current[0]["lines"][0][key] = value
+                with self.assertRaises(SMOKE.VerificationError):
+                    SMOKE.compare_results(baseline, current)
+        current = copy.deepcopy(baseline)
+        current[0]["lines"][0]["box"][0]["x"] += 2
+        with self.assertRaises(SMOKE.VerificationError):
+            SMOKE.compare_results(baseline, current)
+
     def test_complete_real_inference_contract(self):
         results, events = valid_records()
         report = SMOKE.verify_output(serialize(results), serialize(events))

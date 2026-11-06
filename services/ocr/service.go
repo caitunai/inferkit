@@ -101,13 +101,13 @@ func (s *Service) loadModels() error {
 	det := modelSettings{
 		role: "detection",
 		path: c.DetectionModel, pin: c.DetectionSHA256, threads: s.plan.detectionThreads, slots: 1, cache: c.CoreMLCache,
-		backend: onnx.Backend{Provider: cmp.Or(c.DetectionProvider, c.Provider), ComputeUnits: c.CoreMLComputeUnits},
+		backend: onnx.Backend{Provider: cmp.Or(c.DetectionProvider, c.Provider), ComputeUnits: c.CoreMLComputeUnits, Threads: s.plan.detectionThreads, Streams: 1},
 		input:   ort.Shape{1, 3, -1, -1}, output: ort.Shape{1, 1, -1, -1},
 	}
 	rec := modelSettings{
 		role: "recognition",
 		path: c.RecognitionModel, pin: c.RecognitionSHA256, threads: s.plan.recognitionThreads, slots: s.plan.lineWorkers, cache: c.CoreMLCache,
-		backend: onnx.Backend{Provider: cmp.Or(c.RecognitionProvider, c.Provider), ComputeUnits: c.CoreMLComputeUnits},
+		backend: onnx.Backend{Provider: cmp.Or(c.RecognitionProvider, c.Provider), ComputeUnits: c.CoreMLComputeUnits, Threads: s.plan.lineWorkers * s.plan.recognitionThreads, Streams: s.plan.lineWorkers},
 		input:   ort.Shape{1, 3, int64(c.RecognitionHeight), -1}, output: ort.Shape{1, -1, int64(len(s.dictionary))},
 	}
 	var err error
