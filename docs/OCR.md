@@ -248,13 +248,13 @@ coremlCache=true
 
 `recognitionBatchSize` 默认 4，范围 0–16，0/1 采用单行 Run；自动计划还按内存下调。按完全相同的输入宽度分组，避免额外扩大 padding；读取顺序通过原索引恢复。CPU 在行数较少时保留行并行，在较多行时才组批；每个 batch 使用共享模型会话、原有 CPU 令牌和受限工作位。批量输出也按单次元素预算限制，长行可自动退回单行。任何输入、原生 Run 或 CTC 错误都会取消并排空整组，不返回部分结果。
 
-SIMD 使用 Go 1.27 的 `simd/archsimd`，用于概率有效性校验与 CTC 融合校验/argmax；无效概率拒绝规则、CTC blank/重复字符和并列最大值的首索引保持一致。构建方式：
+SIMD 使用 Go 1.27 架构和向量宽度无关的 `simd` 包，用于概率有效性校验与 CTC 融合校验/argmax；无效概率拒绝规则、CTC blank/重复字符和并列最大值的首索引保持一致。构建方式：
 
 ```bash
 GOEXPERIMENT=simd CGO_ENABLED=1 go build -tags vips -o inferkit .
 ```
 
-arm64 直接使用内核，amd64 先检查 AVX；未启用实验、架构不支持或使用 `purego` 标签时自动走标量，不引入 CGO NEON/SSE2 内核。`tensor_backend` 表示实际选择。OCR 的 BGR 归一化、双线性采样和透视裁剪仍保持原计算规则，不套用分类模型的 320×320 libvips thumbnail。
+硬件分派与向量宽度由标准库选择，不调用架构专用的归约、shuffle 或 CPU API。标准库报告模拟执行、未启用实验或指定 `purego` 时，业务层使用标量回退；`GODEBUG=simd=0` 可复测该路径。`tensor_backend` 表示实际选择。OCR 的 BGR 归一化、双线性采样和透视裁剪仍保持原计算规则，不套用分类模型的 320×320 libvips thumbnail。
 
 输入张量、已知形状的输出张量和 RunOptions 按模型保存在有界池中。每个 slot 独占到后处理完成，后续相同形状 Run 可直接写入复用输出，避免绑定层重复复制整块动态输出。首次或新形状仍使用原生输出探测。若兼容自定义模型的输出维度随数据变化，最多重新探测一次；取消不会重试。原生调用和取消回调结束后才可归还。空闲缓存数由工作位限制，每 slot 最多保留 32MiB，较大或失败的 slot 直接销毁；每次归还先清空像素与概率，关闭服务时销毁全部池和会话。
 
@@ -286,3 +286,5 @@ OCR_TEST_DIR=/absolute/path/to/model-and-fixture \
 `OCR_TEST_DIR` 需包含模型、字典及既有测试用的登机牌 sample.png；基准的 `OCR_TEST_IMAGE` 可指定其他原图。正式上线还应使用业务标注集、真实 URL/上传和目标并发，比较冷启动、间隔请求与稳定吞吐。可通过 `recognitionBatchSize=1`、`warmupRuns=0`、`coremlCache=false` 分别回退；旧统一 provider 仍有效。
 
 本轮 medium/small、provider、启动及分配的实测数据见 [OCR 优化对照](OCR_OPTIMIZATION.md)。
+
+跨平台 SIMD 修复、双架构编译和 CI 测试图片处理见 [可移植 SIMD](PORTABLE_SIMD.md)。

@@ -115,7 +115,7 @@ bash scripts/prepare-image-linux.sh /opt/inferkit-image /absolute/path/native-so
 
 ## SIMD、资源及观测
 
-Go 1.27 的 `simd/archsimd` 通过 `GOEXPERIMENT=simd` 启用。M2 使用 NEON；amd64 先检查 AVX 支持，再使用对应内核，不要求 AVX2/AVX512；没有 AVX 或未启用实验时，仅张量转换保留小规模标量实现。libvips、dav1d 和 ONNX Runtime 各自的原生 CPU 优化不依赖这个 Go 构建开关。
+Go 1.27 的架构无关 `simd` 包通过 `GOEXPERIMENT=simd` 启用。统一内核按标准库的运行时向量宽度分块，不直接依赖 NEON/AVX 指令 API；标准库报告模拟执行、未启用实验或指定 `purego` 时使用标量实现。跨平台检查见 [可移植 SIMD](PORTABLE_SIMD.md)。libvips、dav1d 和 ONNX Runtime 各自的原生 CPU 优化不依赖这个 Go 构建开关。
 
 处理位、ORT 算子线程和请求容量仍自动计算。原生解码/中间缓冲按每个源像素 48 字节及固定运行余量预算，防止只看 Go heap 而忽略 C 内存。libvips 操作缓存关闭；原生像素由单一调用者释放。取消通过 C 原子标记、libvips progress 和 libheif 取消回调协作传递，释放前等待取消回调结束；不提前释放正在被原生工作使用的内存。
 

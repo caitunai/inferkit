@@ -9,6 +9,8 @@ Debian 13 是当前容器运行环境；原生库使用容器内的 glibc。宿�
 
 前端由 Node 24 构建，随后嵌入 Go 二进制；Go 使用 `golang:1.27-trixie`、CGO 和 `GOAMD64=v1` 编译。镜像包含固定的 ONNX Runtime CPU 1.31.1 及其系统依赖，通过共享脚本下载官方包、校验 SHA-256 并核对 C API 版本。业务推理继续仅使用 CPU。默认启用 `WITH_VIPS=true` 及 Go 标准 SIMD，并在私有前缀构建固定的 libvips 8.18.7、libheif 1.23.7、dav1d 1.5.4、Highway 1.4.0；JPEG 使用 Debian libjpeg62-turbo。
 
+公开测试图片作为普通 Git 文件提交，避免 checkout 后留下 LFS 指针而使解码测试失败；模型权重继续使用 LFS，CI 不为测试拉取私有业务模型。[可移植 SIMD 与测试素材](PORTABLE_SIMD.md)
+
 配置、训练模型、密钥和数据库内容通过外部配置或挂载提供。`.dockerignore` 使用构建输入白名单，排除 `.git`、本机 `.app.toml` / `.env`、模型权重、私钥、依赖目录和已有构建产物，避免它们进入镜像或 CI 构建缓存。
 
 ## GitHub Actions 构建和发布

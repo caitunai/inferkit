@@ -1,17 +1,18 @@
-//go:build goexperiment.simd && (arm64 || amd64) && !purego
+//go:build goexperiment.simd && !purego
 
 package imagefilter
 
 import (
 	"image"
-	"simd/archsimd"
+
+	"github.com/caitun/inferkit/services/internal/vector"
 )
 
 func tensorBackendName() string { return planarBackendName() }
 
 func tensorSIMD(img *image.NRGBA, dst []float32) bool {
 	w, h := img.Bounds().Dx(), img.Bounds().Dy()
-	if !planarSIMDSupported() || w < 1 || h < 1 || w > imageSize || h > imageSize || len(dst) != inputLength {
+	if !vector.Enabled() || w < 1 || h < 1 || w > imageSize || h > imageSize || len(dst) != inputLength {
 		return false
 	}
 	for i := range dst {
@@ -27,15 +28,7 @@ func tensorSIMD(img *image.NRGBA, dst []float32) bool {
 }
 
 func writeRGBARow(src []byte, red, green, blue []float32) {
-	mask := archsimd.BroadcastUint32x4(pixelMax)
-	i := 0
-	for ; i+4 <= len(src)/4; i += 4 {
-		pixels := archsimd.LoadUint8x16(src[i*4:]).ReshapeToUint32s()
-		alpha := pixels.ShiftAllRight(24)
-		blendFour(pixels.And(mask), alpha, red[i:])
-		blendFour(pixels.ShiftAllRight(8).And(mask), alpha, green[i:])
-		blendFour(pixels.ShiftAllRight(16).And(mask), alpha, blue[i:])
-	}
+	i := vector.BlendRGBA(src, red, green, blue)
 	for ; i < len(src)/4; i++ {
 		pixel := src[i*4:][:4]
 		alpha := int(pixel[3])
@@ -43,15 +36,6 @@ func writeRGBARow(src []byte, red, green, blue []float32) {
 		green[i] = whiteChannel(pixel[1], alpha)
 		blue[i] = whiteChannel(pixel[2], alpha)
 	}
-}
-
-func blendFour(color, alpha archsimd.Uint32x4, dst []float32) {
-	white := archsimd.BroadcastUint32x4(pixelMax)
-	sum := color.Mul(alpha).Add(white.Sub(alpha).Mul(white)).Add(archsimd.BroadcastUint32x4(127))
-	// Exact floor(sum/255) for [0,65152]; constant shifts require only AVX
-	// on amd64, unlike variable per-lane shifts which require AVX2.
-	value := sum.Add(archsimd.BroadcastUint32x4(1)).Add(sum.ShiftAllRight(8)).ShiftAllRight(8)
-	value.BitsToInt32().ConvertToFloat32().Div(archsimd.BroadcastFloat32x4(pixelMax)).Store(dst)
 }
 
 func whiteChannel(value byte, alpha int) float32 {
