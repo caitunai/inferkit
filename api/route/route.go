@@ -8,10 +8,11 @@ import (
 	"github.com/caitun/inferkit/db"
 	"github.com/caitun/inferkit/services/imagefilter"
 	"github.com/caitun/inferkit/services/ocr"
+	"github.com/caitun/inferkit/services/pulse"
 )
 
 // InitRoute performs the init route operation.
-func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service) {
+func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service, reporter EventReporter) {
 	InitMiddleware()
 	r.Use(AttemptAuth())
 	r.Use(PageNavigation(filter != nil, recognizer != nil, records != nil && imageReviewAuth != nil))
@@ -25,7 +26,7 @@ func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageSto
 	}
 	initConfigCenterHandler(r)
 	initImageReviewHandler(r, records)
-	initAPIHandler(r, filter, records, collect, recognizer)
+	initAPIHandler(r, filter, records, collect, recognizer, reporter)
 }
 
 func initImageReviewHandler(r *base.Router, records *db.ImageStore) {
@@ -61,7 +62,7 @@ func initConfigCenterHandler(r *base.Router) {
 	handler.ConfigCenterRuntimeControl(configCenterRuntime)
 }
 
-func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service) {
+func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service, reporter EventReporter) {
 	api := r.Group("/api", apiAuthorized)
 	api.GET("/", handler.APIHomePage)
 	if filter != nil {
@@ -70,13 +71,14 @@ func initAPIHandler(r *base.Router, filter *imagefilter.Service, records *db.Ima
 			recorder = records
 		}
 		native, goBackend := handler.FilterImageBackends(filter, recorder)
-		api.POST("/image/filter", native)
-		api.POST("/image/filter/libvips", native)
-		api.POST("/image/filter/go", goBackend)
+		usage := ImageUsage(reporter, pulse.ImageFilter)
+		api.POST("/image/filter", usage, native)
+		api.POST("/image/filter/libvips", usage, native)
+		api.POST("/image/filter/go", usage, goBackend)
 	}
 
 	if recognizer != nil {
-		api.POST("/image/ocr", handler.RecognizeImage(recognizer))
+		api.POST("/image/ocr", ImageUsage(reporter, pulse.ImageOCR), handler.RecognizeImage(recognizer))
 	}
 
 	// Add CRUD services for db.User

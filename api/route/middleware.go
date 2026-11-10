@@ -1,6 +1,7 @@
 package route
 
 import (
+	"context"
 	"crypto/rsa"
 	"errors"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +19,31 @@ import (
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/db"
 )
+
+// EventReporter is the HTTP layer's narrow usage reporting contract.
+type EventReporter interface {
+	Enqueue(context.Context, string, time.Time, time.Duration) error
+}
+
+// ImageUsage counts requests admitted by apiAuthorized, including invalid input,
+// busy responses and inference failures. Delivery cannot replace the API result.
+func ImageUsage(reporter EventReporter, eventName string) base.HandlerFunc {
+	return func(c *base.Context) {
+		admittedAt := time.Now()
+		// Inference handlers replace Request.Context with a timeout context and
+		// cancel it on return. Retain the incoming request context for reporting.
+		ctx := c.Request.Context()
+		defer func() {
+			if reporter == nil {
+				return
+			}
+			if err := reporter.Enqueue(ctx, eventName, admittedAt, time.Since(admittedAt)); err != nil {
+				log.Ctx(ctx).Warn().Err(err).Str("event_name", eventName).Msg("Pulse usage reporting failed")
+			}
+		}()
+		c.Next()
+	}
+}
 
 var (
 	jwtSecret             []byte

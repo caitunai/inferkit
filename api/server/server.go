@@ -24,6 +24,7 @@ import (
 	"github.com/caitun/inferkit/db"
 	"github.com/caitun/inferkit/services/imagefilter"
 	"github.com/caitun/inferkit/services/ocr"
+	"github.com/caitun/inferkit/services/pulse"
 	"github.com/caitun/inferkit/xutil"
 )
 
@@ -32,6 +33,7 @@ type Server struct {
 	ImageFilter         *imagefilter.Service
 	OCR                 *ocr.Service
 	ImageRecords        *db.ImageStore
+	Pulse               *pulse.Client
 	Port                string
 	Mode                string
 	CollectImageResults bool
@@ -50,7 +52,7 @@ func NewServer(port, mode string) *Server {
 
 // Start starts the service lifecycle.
 func (s *Server) Start(ctx context.Context) {
-	r := s.newRouter()
+	r := s.newRouter() //nolint:contextcheck // Router setup only registers callbacks; their contexts come from incoming HTTP requests, not the server lifecycle.
 	srv := &http.Server{
 		Addr:              ":" + s.Port,
 		Handler:           r,
@@ -126,7 +128,7 @@ func (s *Server) newRouter() *gin.Engine {
 		},
 		MaxAge: 12 * time.Hour,
 	}))
-	route.InitRoute(base.NewRouter(r), s.ImageFilter, s.ImageRecords, s.CollectImageResults, s.OCR)
+	route.InitRoute(base.NewRouter(r), s.ImageFilter, s.ImageRecords, s.CollectImageResults, s.OCR, s.Pulse)
 	r.HTMLRender = base.NewRender()
 	return r
 }

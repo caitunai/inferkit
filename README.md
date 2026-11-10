@@ -584,3 +584,13 @@ atlas migrate apply --env local
 ## OCR（PP-OCRv6 / Go + ONNX）
 
 新增 `ocr SOURCE [SOURCE...]` 和现有 `serve` 下的 `POST /api/image/ocr`，输入支持 JPEG、WebP、PNG、AVIF。默认部署模型为 PP-OCRv6 medium；检测、识别模型、配套字典和资源限制均可配置。模型准备、CLI/API调用和部署说明见 [OCR 文档](docs/OCR.md)。
+
+### Pulse 请求统计
+
+Pulse 配置分为 `[pulse.server]` 和 `[pulse.app]`，完整示例见 `.app.toml.example`。共享的 `[pulse.server]` 包含完整的 HS256 `secret`、接口 `url` 和 `audience`，可以通过现有 HTTP `configload.targets` 在启动时加载；也可使用 `PULSE_SERVER_SECRET` 环境变量提供签名密钥。本地的 `[pulse.app]` 包含 `enabled`、`issuer`、tenant/app/platform、超时、JWT 有效期和连接池等设置。设置 `pulse.app.enabled=true` 启用统计；默认 issuer 为 `inferkit-server`，tenant/app/platform 为 `1/3/1`。原有平铺的 `pulse.*` 配置需迁移到对应子段。启用时配置无效会阻止 `serve` 启动，脱敏的 secret 不能用于真实签名。
+
+远程配置在本地配置读取后递归合并，随后才初始化 Pulse 客户端。远程空的 `[pulse]` 或仅包含 `[pulse.server]` 不会清空本地 `[pulse.app]`；远程提供的同名叶子项会覆盖本地值，环境变量保持更高优先级。子段划分用于避免命名冲突，不是本地配置保护机制：如果远程也提供 `pulse.app.*`，相同项仍会被覆盖。
+
+统计覆盖 `POST /api/image/filter`、`/api/image/filter/libvips`、`/api/image/filter/go` 和 `/api/image/ocr`。每个通过鉴权并进入处理器的请求（包括缓存命中、参数错误、容量不足和推理失败）发送一次 `image.filter` 或 `image.ocr` 事件；未通过鉴权、页面访问和 CLI 调用不计入。每次生成独立 UUID 作为 `request_id`，固定 `external_user_id=inferkit-u1`，`tokens` 为本次请求从进入处理器到处理完成的耗时毫秒数（`int64`，不足 1 毫秒的部分舍去，不计 Pulse 上报自身的耗时），按请求进入处理器时的北京时间生成 `client_session_id=sid-yyyymmddhh0000`。事件不包含原始图片、图片 URL 或真实用户信息。
+
+处理器完成后立即提交后台上报，网络请求由 `xutil.WaitGroup("pulse_report")` 管理的 goroutine 执行，主请求不等待统计网络 I/O。JWT 使用 HS256 和配置中的 `aud`/`iss`，默认有效期 5 分钟，每次上报重新签发。后台任务使用客户端持有的进程生命周期上下文，不因 HTTP 请求完成或取消而中断；只复制请求日志上下文，不持有 Gin Context、Request 或响应对象。单次上报默认最多等待 1 秒，调度和连接池等待也在超时范围内。最多同时执行 `pulse.app.maxConnections` 个上报（默认 32），容量耗尽时立即记录日志并跳过本次统计，不排队、不阻塞主请求。普通发送错误记录日志；panic 由 xutil 统一恢复并记录堆栈，无论正常返回还是 panic 都会释放并发名额。此统计为尽力上报：容量耗尽、进程取消、网络故障或进程退出可能丢失事件，不自动重试、不提供持久化补发。停止 HTTP 请求后，`Close()` 停止接收新事件并等待已接受任务，超过 `pulse.app.shutdownTimeout`（默认 5 秒）取消未完成 HTTP 调用，待任务退出后释放连接；重复或并发关闭是安全的。客户端继续限制响应大小并拒绝重定向。测试只使用本地测试服务器，不向真实 Pulse 服务发送事件。

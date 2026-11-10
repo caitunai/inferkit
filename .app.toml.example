@@ -93,6 +93,27 @@ issuers=[ "allowed name of issuer" ]
 assetMode="embedded"
 viteDevOrigin="http://127.0.0.1:5173"
 
+[pulse.server]
+# Shared settings may be supplied by an HTTP configload target.
+url="https://pulse.caitun.com/api/pulse/events"
+# Full HS256 secret (at least 32 bytes). Supply remotely or via PULSE_SERVER_SECRET.
+secret=""
+audience="pulse"
+
+[pulse.app]
+# Reports all authenticated image API attempts, including failures and cache hits.
+# Async best effort via protected goroutines; capacity exhaustion drops the event.
+enabled=false
+issuer="inferkit-server"
+tenantId=1
+appId=3
+platformId=1
+timeout="1s"
+shutdownTimeout="5s"
+tokenLifetime="5m"
+maxConnections=32
+maxResponseBytes=65536
+
 [configcenter]
 enabled=false
 username=""

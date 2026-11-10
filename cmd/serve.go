@@ -30,6 +30,12 @@ var serveCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, _ []string) (returnErr error) {
+		metrics, err := newPulseClient(cmd.Context(), viper.GetViper())
+		if err != nil {
+			return err
+		}
+		defer metrics.Close()
+
 		var filter *imagefilter.Service
 		if viper.GetString("image.filter.model") != "" {
 			var initErr error
@@ -49,11 +55,11 @@ var serveCmd = &cobra.Command{
 			}
 			defer func() { returnErr = errors.Join(returnErr, recognizer.Close()) }()
 		}
-		if err := redis.Init(cmd.Context()); err != nil {
+		if err = redis.Init(cmd.Context()); err != nil {
 			return errors.Join(ErrServeCommand, err)
 		}
 		cache.InitCache()
-		err := queue.Init()
+		err = queue.Init()
 		if err != nil {
 			log.Error().
 				Err(err).
@@ -64,6 +70,7 @@ var serveCmd = &cobra.Command{
 			return errors.Join(ErrServeCommand, err)
 		}
 		s := server.NewServer(viper.GetString("port"), viper.GetString("mode"))
+		s.Pulse = metrics
 		s.OCR = recognizer
 		if setupErr := configureImageServer(cmd.Context(), s, filter); setupErr != nil {
 			return errors.Join(ErrServeCommand, setupErr)
