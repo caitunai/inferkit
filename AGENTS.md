@@ -31,7 +31,8 @@ Always use the latest stable version of Go (1.26 or 1.27 or newer) and be famili
 - Avoid using hardcoded values in the code; instead, use defined static variables or configuration files for settings whenever possible.
 - Avoid duplicated implementation logic. When two or more code paths share the same lifecycle, validation, query preparation, file output, cleanup, cache, decoding, or result-building logic, extract a small helper function or focused type instead of copying the block. Keep the abstraction narrow and type-safe, pass package-level sentinel errors into helpers when each caller needs its own error classification, and verify duplicate-code changes with `golangci-lint run --enable-only=dupl` in addition to the full lint run.
 - Use each tool's system default cache directories. Do not set `GOCACHE`, `GOMODCACHE`, `GOLANGCI_LINT_CACHE`, npm cache paths, or similar cache environment variables to paths inside this repository unless the user explicitly asks for an isolated per-project cache. Shared default caches allow Go, golangci-lint, npm, and other tools to reuse artifacts across projects and avoid duplicating large cache directories in every checkout.
-- For more requirements, please refer to the file and directory descriptions as well as the architecture description of this project.
+- For more requirements, please refer to the file and directory descriptions as well as the architecture description of this project. 
+- Agents are not allowed to proactively connect to development servers or production deployment servers to perform any operations during the development process.
 
 Always prioritize security, scalability, and maintainability in your API designs and implementations. Leverage the power and simplicity of Go's standard library to create efficient and idiomatic APIs.
 
