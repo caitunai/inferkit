@@ -5,8 +5,12 @@ import { filtersFromURL, queryParams, safeImageURL } from "./query.js";
 
 const record = (id = 1) => ({ id, url: `https://example.com/${id}.png`, confidence: 0.8, revision: 0, label: "1_valid" });
 function setup(view = "review", responses = []) {
-  const requests = [];
-  const browser = { location: { search: "" }, AbortController, fetch: async (url, options) => {
+  const requests = [], timers = new Map();
+  let timerID = 0;
+  const browser = { location: { search: "" }, AbortController,
+    setTimeout(callback, delay) { const id = ++timerID; timers.set(id, { callback, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); },
+    fetch: async (url, options) => {
     requests.push({ url, options });
     const response = responses.shift() || { status: 0, data: { page: { items: [], has_more: false } } };
     return { ok: response.status === 0, status: response.status || 200, json: async () => response };
@@ -14,7 +18,7 @@ function setup(view = "review", responses = []) {
   const app = createImageReviewApp(browser); app.$el = { dataset: { view } };
   const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
   app.$refs = { annotationDialog: dialog }; app.$nextTick = async () => {};
-  return { app, requests, browser, dialog };
+  return { app, requests, browser, dialog, timers };
 }
 const page = (items, hasMore = false) => ({ status: 0, data: { page: { items, has_more: hasMore } } });
 
@@ -57,14 +61,17 @@ test("conflicting or failed annotations remain on the current image", async () =
 });
 
 test("a failed next-image read does not turn a committed annotation into a failed save", async () => {
-  const { app } = setup("review", [page([record()]), { status: 0, data: { saved: true } }, { status: 503, message: "加载失败" }, page([record(2)])]);
+  const { app, timers } = setup("review", [page([record()]), { status: 0, data: { saved: true } }, { status: 503, message: "加载失败" }, page([record(2)])]);
   await app.init(); await app.annotate("1_valid");
   assert.equal(app.reviewedCount, 1);
-  assert.match(app.notice, /已保存/);
+  assert.match(app.toast.message, /标注已保存/);
+  assert.equal(app.toast.type, "error");
+  assert.equal(timers.size, 0);
   assert.match(app.error, /标注已保存/);
   assert.equal(app.current, null);
   await app.loadPage(app.reviewCursor);
   assert.equal(app.current.id, 2);
+  assert.equal(app.toast.message, "");
   app.destroy();
 });
 
@@ -139,6 +146,62 @@ test("quick adoption updates the card without fetching another record", async ()
   app.destroy();
 });
 
+test("card results use one success toast whose timeout resets after each save", async () => {
+  const saved = () => ({ status: 0, data: { saved: true } });
+  const { app, timers } = setup("list", [page([record()]), saved(), saved(), saved()]);
+  await app.init();
+  for (const [label, action] of [
+    ["无效图片", () => app.annotateList(app.items[0], "0_invalid")],
+    ["有效图片", () => app.annotateList(app.items[0], "1_valid")],
+    ["有效图片", () => app.acceptModel(app.items[0])],
+  ]) {
+    const previousTimer = timers.keys().next().value;
+    await action();
+    assert.deepEqual(app.toast, { message: `已保存：${label}`, type: "success" });
+    assert.equal(timers.size, 1);
+    assert.equal(timers.has(previousTimer), false);
+  }
+  const timer = timers.values().next().value;
+  assert.equal(timer.delay, 3000);
+  timer.callback();
+  assert.equal(app.toast.message, "");
+  assert.equal(timers.size, 0);
+  assert.equal(app.items[0].revision, 3);
+  app.destroy();
+});
+
+test("failed saves keep an error toast with a reload action", async () => {
+  const first = record();
+  const { app, requests, timers } = setup("list", [page([first]), { status: 409, message: "版本冲突" },
+    page([{ ...first, revision: 3, correction: "1_valid" }])]);
+  await app.init(); await app.annotateList(first, "0_invalid");
+  assert.deepEqual(app.toast, { message: "版本冲突", type: "error" });
+  assert.equal(timers.size, 0);
+  assert.equal(first.revision, 0);
+  await app.retryToast();
+  assert.equal(app.toast.message, "");
+  assert.equal(app.error, "");
+  assert.equal(app.items[0].revision, 3);
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2].options.method, undefined);
+  app.destroy();
+});
+
+test("dismissal and destruction clear pending toast timers", async () => {
+  const { app, timers } = setup("list");
+  app.notify("已保存");
+  app.dismissToast();
+  assert.equal(app.toast.message, "");
+  assert.equal(timers.size, 0);
+  app.notify("已保存");
+  app.destroy();
+  assert.equal(app.toast.message, "");
+  assert.equal(timers.size, 0);
+  app.notify("迟到的提示");
+  assert.equal(app.toast.message, "");
+  assert.equal(timers.size, 0);
+});
+
 test("direct card labels overwrite same-URL annotations and preserve predictions", async () => {
   const first = record(1), sibling = { ...record(2), url: first.url, label: "0_invalid", revision: 4 };
   const other = record(3);
@@ -201,7 +264,7 @@ test("pending cards are removed after saving while pagination keeps the original
   app.destroy();
 });
 
-test("modal conflicts stay open and reload the latest revision before retry", async () => {
+test("modal conflicts show a toast and reload the latest revision before retry", async () => {
   const updated = { ...record(), revision: 3, correction: "1_valid" };
   const sibling = { ...record(2), url: updated.url, revision: 5 };
   const { app, requests, dialog } = setup("list", [page([record(), sibling]), { status: 409, message: "版本冲突" },
@@ -209,8 +272,10 @@ test("modal conflicts stay open and reload the latest revision before retry", as
   await app.init(); await app.openAnnotation(app.items[0]); await app.chooseLabel("0_invalid");
   assert.equal(dialog.open, true);
   assert.equal(app.modalError, "版本冲突");
+  assert.deepEqual(app.toast, { message: "版本冲突", type: "error" });
   assert.equal(app.items[0].revision, 0);
-  await app.reloadAnnotation();
+  await app.retryToast();
+  assert.equal(app.toast.message, "");
   assert.equal(sibling.revision, 8);
   assert.equal(sibling.correction, "1_valid");
   await app.chooseLabel("0_invalid");

@@ -46,6 +46,9 @@ for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".sm\\:grid-cols-
   if (!reviewCSS.includes(selector)) throw new Error(`Image review CSS is missing ${selector}`);
 }
 console.log("Verified image review gallery and single-image annotation styles.");
+const toastRule = reviewCSS.match(/\.review-toast-region\{([^}]+)\}/)?.[1];
+if (!toastRule?.includes("position:fixed")) throw new Error("Image review toast must stay outside the page layout");
+console.log("Verified image review toast uses fixed positioning.");
 
 const ocrEntry = manifest["src/ocr/main.js"];
 if (!ocrEntry?.css?.length) throw new Error("OCR entry is missing its stylesheet");

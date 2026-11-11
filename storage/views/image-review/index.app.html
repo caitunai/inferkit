@@ -11,8 +11,6 @@
       <label class="review-field">排序<select x-model="filters.sort" :disabled="busy"><option value="newest">最新识别优先</option><option value="oldest">最早识别优先</option><option value="confidence_asc">置信度从低到高</option><option value="confidence_desc">置信度从高到低</option></select></label>
       <button class="review-button review-primary" type="submit" :disabled="busy" x-text="view === 'review' ? '开始本轮标注' : '应用筛选'"></button>
     </form>
-    <div class="review-error" role="alert" x-show="error"><span x-text="error"></span><button x-show="view === 'list'" type="button" class="review-button" @click="loadPage(cursors.at(-1))" :disabled="busy">重新加载本页</button></div>
-    <div class="review-notice" role="status" x-show="notice" x-text="notice"></div>
     <div class="review-empty" x-show="loading" role="status">正在加载识别记录…</div>
 
     <section x-show="view === 'list' && !loading" aria-label="识别图片列表">
@@ -37,26 +35,36 @@
           <div class="review-single"><img x-show="currentImage" :src="currentImage || undefined" @error="brokenImages[current.id] = true" referrerpolicy="no-referrer" alt="当前待纠错的图片"><span x-show="!currentImage">图片无法加载</span></div>
           <aside class="review-aside"><h2>选择类型</h2><div class="review-detail"><p>#<span x-text="current.id"></span> · 模型：<strong x-text="labelTitle(current.label)"></strong> <strong x-text="percent(current.confidence)"></strong></p><p x-show="current.correction">人工：<strong x-text="labelTitle(current.correction)"></strong></p></div>
             {{ template "image-review.choices" . }}
-            <div class="review-actions"><a :href="safeImageURL(current.url) || undefined" target="_blank" rel="noopener noreferrer">查看原图 ↗</a><button x-show="error" type="button" class="review-button" @click="reloadCurrent()" :disabled="busy">重新加载</button></div>
+            <div class="review-actions"><a :href="safeImageURL(current.url) || undefined" target="_blank" rel="noopener noreferrer">查看原图 ↗</a></div>
           </aside>
         </div>
       </template>
     </section>
   </div>
+  {{ template "image-review.toast" "page" }}
   <dialog x-ref="annotationDialog" class="review-modal" aria-labelledby="review-modal-title" @cancel.prevent="closeAnnotation()" @click.self="closeAnnotation()">
     <header class="review-modal-header"><h2 id="review-modal-title">图片预览与审核</h2><button type="button" class="review-modal-close" @click="closeAnnotation()" :disabled="saving" aria-label="关闭图片预览">×</button></header>
     <template x-if="modalRecord">
       <div class="review-modal-body">
         <div class="review-modal-photo"><img x-show="modalImage" :src="modalImage || undefined" @error="brokenImages[modalRecord.id] = true" referrerpolicy="no-referrer" alt="待纠错图片"><span x-show="!modalImage">图片无法加载</span></div>
         <div class="review-modal-aside"><div class="review-detail"><p>#<span x-text="modalRecord.id"></span> · 模型：<strong x-text="labelTitle(modalRecord.label)"></strong> <strong x-text="percent(modalRecord.confidence)"></strong></p><p x-show="modalRecord.correction">人工：<strong x-text="labelTitle(modalRecord.correction)"></strong></p></div>
-          <div class="review-error" x-show="modalError" x-text="modalError" role="alert"></div>
           {{ template "image-review.choices" . }}
-          <div class="review-actions"><a :href="safeImageURL(modalRecord.url) || undefined" target="_blank" rel="noopener noreferrer">查看原图 ↗</a><button x-show="modalError" type="button" class="review-button" @click="reloadAnnotation()" :disabled="busy">重新加载</button></div>
+          <div class="review-actions"><a :href="safeImageURL(modalRecord.url) || undefined" target="_blank" rel="noopener noreferrer">查看原图 ↗</a></div>
         </div>
       </div>
     </template>
+    {{ template "image-review.toast" "modal" }}
   </dialog>
 </main>
+{{ end }}
+
+{{ define "image-review.toast" }}
+<div class="review-toast-region" x-show="toast.message && {{ if eq . "page" }}!modalRecord{{ else }}modalRecord{{ end }}" x-transition.opacity aria-live="polite" aria-atomic="true">
+  <div class="review-toast" :class="toast.type === 'error' ? 'review-toast-error' : 'review-toast-success'">
+    <div class="review-toast-message"><p x-text="toast.message"></p><button x-show="toast.type === 'error'" type="button" class="review-button review-toast-retry" @click="retryToast()" :disabled="busy" x-text="modalRecord || view === 'review' ? '重新加载记录' : '重新加载本页'"></button></div>
+    <button type="button" class="review-toast-close" @click="dismissToast()" aria-label="关闭操作提示">×</button>
+  </div>
+</div>
 {{ end }}
 
 {{ define "image-review.choices" }}

@@ -1,8 +1,10 @@
 import { cursorOf, filtersFromURL, queryParams, reviewHref, safeImageURL } from "./query.js";
 import { labelTitle, percent } from "../image-filter/history.js";
 
+const successToastDuration = 3000;
+
 export function createImageReviewApp(browser = window) {
-  let controller = null, disposed = false;
+  let controller = null, disposed = false, toastTimer = null;
   const request = async (path, options = {}) => {
     const response = await browser.fetch(`/image-review/api${path}`, {
       credentials: "same-origin", ...options,
@@ -17,7 +19,7 @@ export function createImageReviewApp(browser = window) {
   };
   return {
     view: "list", filters: {}, activeFilters: {}, items: [], current: null, cursors: [null], reviewCursor: null,
-    loading: false, saving: false, hasMore: false, error: "", notice: "", reviewedCount: 0, brokenImages: {},
+    loading: false, saving: false, hasMore: false, error: "", toast: { message: "", type: "success" }, reviewedCount: 0, brokenImages: {},
     modalRecord: null, modalError: "", pageCursor: null,
     async init() {
       this.view = this.$el.dataset.view;
@@ -27,7 +29,25 @@ export function createImageReviewApp(browser = window) {
       if (this.view === "review" && id && /^[1-9]\d*$/.test(id)) return this.reloadCurrent(id);
       return this.applyFilters();
     },
-    destroy() { disposed = true; controller?.abort(); this.$refs?.annotationDialog?.close(); },
+    destroy() { disposed = true; controller?.abort(); this.dismissToast(); this.$refs?.annotationDialog?.close(); },
+    notify(message, type = "success") {
+      if (disposed) return;
+      this.dismissToast();
+      this.toast = { message, type };
+      if (type === "success") toastTimer = browser.setTimeout(() => this.dismissToast(), successToastDuration);
+    },
+    dismissToast() {
+      if (toastTimer !== null) browser.clearTimeout(toastTimer);
+      toastTimer = null; this.toast.message = "";
+    },
+    reportError(message, field = "error") { this[field] = message; this.notify(message, "error"); },
+    retryToast() {
+      if (this.busy) return;
+      this.dismissToast();
+      if (this.modalRecord) return this.reloadAnnotation();
+      if (this.view === "list") return this.loadPage(this.cursors.at(-1));
+      return this.current ? this.reloadCurrent() : this.loadPage(this.reviewCursor);
+    },
     get busy() { return this.loading || this.saving; },
     get reviewLink() { return reviewHref(this.activeFilters); },
     get pageNumber() { return this.cursors.length; },
@@ -39,13 +59,14 @@ export function createImageReviewApp(browser = window) {
     dateLabel(value) { return new Date(value).toLocaleString("zh-CN"); },
     async applyFilters() {
       if (this.saving || this.modalRecord || disposed) return;
-      try { queryParams(this.filters); } catch (error) { this.error = error.message; return; }
+      try { queryParams(this.filters); } catch (error) { this.reportError(error.message); return; }
       this.activeFilters = { ...this.filters }; this.cursors = [null]; this.reviewCursor = null;
-      this.reviewedCount = 0; this.notice = "";
+      this.reviewedCount = 0; this.dismissToast();
       return this.loadPage(null);
     },
     async loadPage(cursor) {
       if (disposed) return;
+      if (this.toast.type === "error") this.dismissToast();
       controller?.abort();
       const activeController = new browser.AbortController(); controller = activeController;
       this.loading = true; this.error = ""; this.hasMore = false;
@@ -61,7 +82,7 @@ export function createImageReviewApp(browser = window) {
         this.pageCursor = cursorOf(data.page.items.at(-1));
         this.hasMore = data.page.has_more;
       } catch (error) {
-        if (!disposed && controller === activeController && error.name !== "AbortError") this.error = error.message;
+        if (!disposed && controller === activeController && error.name !== "AbortError") this.reportError(error.message);
       } finally {
         if (!disposed && controller === activeController) { this.loading = false; controller = null; }
       }
@@ -100,7 +121,7 @@ export function createImageReviewApp(browser = window) {
       if (this.busy || !id || disposed) return;
       const errorField = field === "modalRecord" ? "modalError" : "error";
       const activeController = new browser.AbortController(); controller = activeController;
-      this.loading = true; this[errorField] = "";
+      this.loading = true; this[errorField] = ""; this.dismissToast();
       try {
         const data = await request(`/results/${id}`, { signal: activeController.signal });
         if (disposed || controller !== activeController) return;
@@ -112,7 +133,7 @@ export function createImageReviewApp(browser = window) {
         this.items = this.items.map((item) => item.id === id ? data.record : item);
         delete this.brokenImages[id];
       } catch (error) {
-        if (!disposed && controller === activeController && error.name !== "AbortError") this[errorField] = error.message;
+        if (!disposed && controller === activeController && error.name !== "AbortError") this.reportError(error.message, errorField);
       } finally {
         if (!disposed && controller === activeController) { this.loading = false; controller = null; }
       }
@@ -128,7 +149,7 @@ export function createImageReviewApp(browser = window) {
       if (!await this.saveAnnotation(this.current, label)) return;
       this.reviewedCount++;
       await this.nextImage();
-      if (this.error) this.error = `标注已保存，下一张图片加载失败：${this.error}`;
+      if (this.error) this.reportError(`标注已保存，下一张图片加载失败：${this.error}`);
     },
     async annotateList(record, label) {
       if (!await this.saveAnnotation(record, label)) return;
@@ -144,7 +165,7 @@ export function createImageReviewApp(browser = window) {
     async saveAnnotation(record, label) {
       if (this.busy || !record || disposed) return false;
       const errorField = this.modalRecord ? "modalError" : "error";
-      this.saving = true; this[errorField] = ""; this.notice = "";
+      this.saving = true; this[errorField] = ""; this.dismissToast();
       const activeController = new browser.AbortController(); controller = activeController;
       try {
         await request(`/results/${record.id}/annotation`, {
@@ -153,10 +174,10 @@ export function createImageReviewApp(browser = window) {
         });
         if (disposed) return false;
         this.syncAnnotation(record, label);
-        this.notice = `已保存：${labelTitle(label)}`;
+        this.notify(`已保存：${labelTitle(label)}`);
         return true;
       } catch (error) {
-        if (!disposed && error.name !== "AbortError") this[errorField] = error.message;
+        if (!disposed && error.name !== "AbortError") this.reportError(error.message, errorField);
         return false;
       } finally { if (!disposed) { this.saving = false; controller = null; } }
     },

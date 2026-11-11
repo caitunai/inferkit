@@ -24,9 +24,13 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .review-field input { width: 108px; }
 .review-button { min-height: 38px; border: 1px solid #dce2de; border-radius: 7px; background: #fff; padding: 9px 16px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .review-primary { background: #314c3d; color: white; border-color: #314c3d; }
-.review-error, .review-notice { border-radius: 9px; padding: 14px 18px; margin-bottom: 20px; font-size: 13px; }
-.review-error { color: #9d4545; background: #fff0f0; border: 1px solid #efd4d4; }
-.review-notice { color: #426651; background: #ebf4ee; }
+.review-toast-region { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 60; width: min(400px, calc(100vw - 40px)); pointer-events: none; }
+.review-toast { display: flex; align-items: start; gap: 12px; padding: 14px 16px; border: 1px solid; border-radius: 12px; font-size: 13px; box-shadow: 0 8px 32px #172c3526; pointer-events: auto; }
+.review-toast-success { color: #426651; background: #ebf4ee; border-color: #bfdac9; }
+.review-toast-error { color: #9d4545; background: #fff0f0; border-color: #efd4d4; }
+.review-toast-message { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.review-toast-close { display: grid; place-items: center; flex: none; width: 32px; height: 32px; margin: -6px -8px -6px 0; border: 0; border-radius: 6px; background: transparent; font-size: 24px; line-height: 1; }
+.review-toast-retry { margin-top: 10px; }
 .review-card { overflow: hidden; }
 .review-photo { width: 100%; height: 220px; padding: 0; border: 0; background: #edf0ee; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: zoom-in; }
 .review-photo:focus-visible { outline-offset: -3px; }
