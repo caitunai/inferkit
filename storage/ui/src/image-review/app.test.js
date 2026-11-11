@@ -139,6 +139,57 @@ test("quick adoption updates the card without fetching another record", async ()
   app.destroy();
 });
 
+test("direct card labels overwrite same-URL annotations and preserve predictions", async () => {
+  const first = record(1), sibling = { ...record(2), url: first.url, label: "0_invalid", revision: 4 };
+  const other = record(3);
+  const saved = () => ({ status: 0, data: { saved: true } });
+  const { app, requests, dialog } = setup("list", [page([first, sibling, other]), saved(), saved(), saved()]);
+  await app.init();
+  await app.annotateList(first, "0_invalid");
+  await app.annotateList(sibling, "1_valid");
+  await app.acceptModel(sibling);
+  assert.equal(dialog.open, false);
+  assert.equal(requests.length, 4);
+  assert.deepEqual(requests.slice(1).map(({ options }) => JSON.parse(options.body)), [
+    { label: "0_invalid", revision: 0 }, { label: "1_valid", revision: 5 }, { label: "0_invalid", revision: 6 },
+  ]);
+  assert.equal(first.correction, "0_invalid");
+  assert.equal(sibling.correction, "0_invalid");
+  assert.equal(first.revision, 3);
+  assert.equal(sibling.revision, 7);
+  assert.equal(first.label, "1_valid");
+  assert.equal(sibling.label, "0_invalid");
+  assert.equal(first.confidence, 0.8);
+  assert.equal(other.correction, undefined);
+  assert.equal(other.revision, 0);
+  app.destroy();
+});
+
+test("failed direct card writes preserve all same-URL labels and versions", async () => {
+  for (const status of [409, 503]) {
+    const first = record(1), sibling = { ...record(2), url: first.url };
+    const { app, dialog } = setup("list", [page([first, sibling]), { status, message: "保存失败" }]);
+    await app.init(); await app.annotateList(first, "0_invalid");
+    assert.equal(app.error, "保存失败");
+    assert.equal(dialog.open, false);
+    for (const item of app.items) {
+      assert.equal(item.correction, undefined);
+      assert.equal(item.revision, 0);
+    }
+    app.destroy();
+  }
+});
+
+test("pending review removes every same-URL card after a direct label", async () => {
+  const first = record(1), sibling = { ...record(2), url: first.url };
+  const { app, browser } = setup("list", [page([first, sibling, record(3)]), { status: 0, data: { saved: true } }]);
+  browser.location.search = "?review=pending";
+  await app.init(); await app.annotateList(first, "0_invalid");
+  assert.deepEqual(app.items.map(({ id }) => id), [3]);
+  assert.equal(app.pageCursor.id, 3);
+  app.destroy();
+});
+
 test("pending cards are removed after saving while pagination keeps the original cursor", async () => {
   const { app, browser, requests } = setup("list", [page([record(1), record(2)], true), { status: 0, data: { saved: true } }, page([record(3)])]);
   browser.location.search = "?review=pending";
@@ -152,15 +203,21 @@ test("pending cards are removed after saving while pagination keeps the original
 
 test("modal conflicts stay open and reload the latest revision before retry", async () => {
   const updated = { ...record(), revision: 3, correction: "1_valid" };
-  const { app, requests, dialog } = setup("list", [page([record()]), { status: 409, message: "版本冲突" },
+  const sibling = { ...record(2), url: updated.url, revision: 5 };
+  const { app, requests, dialog } = setup("list", [page([record(), sibling]), { status: 409, message: "版本冲突" },
     { status: 0, data: { record: updated } }, { status: 0, data: { saved: true } }]);
   await app.init(); await app.openAnnotation(app.items[0]); await app.chooseLabel("0_invalid");
   assert.equal(dialog.open, true);
   assert.equal(app.modalError, "版本冲突");
   assert.equal(app.items[0].revision, 0);
-  await app.reloadAnnotation(); await app.chooseLabel("0_invalid");
+  await app.reloadAnnotation();
+  assert.equal(sibling.revision, 8);
+  assert.equal(sibling.correction, "1_valid");
+  await app.chooseLabel("0_invalid");
   assert.deepEqual(JSON.parse(requests[3].options.body), { label: "0_invalid", revision: 3 });
   assert.equal(app.items[0].revision, 4);
+  assert.equal(sibling.revision, 9);
+  assert.equal(sibling.correction, "0_invalid");
   assert.equal(dialog.open, false);
   app.destroy();
 });

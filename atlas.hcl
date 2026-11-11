@@ -78,7 +78,7 @@ variable "prod_db" {
 
 # Development environment to generate migrations
 env "dev" {
-  dev = "mysql://${var.dev_username}:${var.dev_password}@${var.dev_host}:${var.dev_port}/${var.dev_db}"
+  dev = "mysql://${var.dev_username}:${var.dev_password}@${var.dev_host}:${var.dev_port}/${var.dev_db}?time_zone=%27%2B00%3A00%27"
 
   migration {
     dir = "file://atlas/migrations"
@@ -92,8 +92,8 @@ env "dev" {
 
 # Local environment to migrate
 env "local" {
-  dev = "mysql://${var.dev_username}:${var.dev_password}@${var.dev_host}:${var.dev_port}/${var.dev_db}"
-  url = "mysql://${var.local_username}:${var.local_password}@${var.local_host}:${var.local_port}/${var.local_db}"
+  dev = "mysql://${var.dev_username}:${var.dev_password}@${var.dev_host}:${var.dev_port}/${var.dev_db}?time_zone=%27%2B00%3A00%27"
+  url = "mysql://${var.local_username}:${var.local_password}@${var.local_host}:${var.local_port}/${var.local_db}?time_zone=%27%2B00%3A00%27"
 
   migration {
     dir = "file://atlas/migrations"
@@ -107,8 +107,8 @@ env "local" {
 
 # Product environment to migrate
 env "prod" {
-  dev = "mysql://${var.dev_username}:${var.dev_password}@${var.dev_host}:${var.dev_port}/${var.dev_db}"
-  url = "mysql://${var.prod_username}:${var.prod_password}@${var.prod_host}:${var.prod_port}/${var.prod_db}"
+  dev = "mysql://${var.dev_username}:${var.dev_password}@${var.dev_host}:${var.dev_port}/${var.dev_db}?time_zone=%27%2B00%3A00%27"
+  url = "mysql://${var.prod_username}:${var.prod_password}@${var.prod_host}:${var.prod_port}/${var.prod_db}?time_zone=%27%2B00%3A00%27"
 
   migration {
     dir = "file://atlas/migrations"

@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"net"
 	"os"
 	"strings"
 	"testing"
@@ -41,9 +40,11 @@ func imageTestDatabase(t *testing.T, prefix string, connections int) *gorm.DB {
 	if os.Getenv("IMAGE_REVIEW_TEST_DATABASE") != "1" {
 		t.Skip("set IMAGE_REVIEW_TEST_DATABASE=1 and DB_LOCAL_* for rollback-only MySQL integration tests")
 	}
-	config := mysqldriver.NewConfig()
-	config.User, config.Passwd, config.DBName = os.Getenv("DB_LOCAL_USERNAME"), os.Getenv("DB_LOCAL_PASSWORD"), os.Getenv("DB_LOCAL_NAME")
-	config.Net, config.Addr, config.ParseTime = "tcp", net.JoinHostPort(os.Getenv("DB_LOCAL_HOST"), os.Getenv("DB_LOCAL_PORT")), true
+	config, err := mysqldriver.ParseDSN(mysqlDSN(os.Getenv("DB_LOCAL_USERNAME"), os.Getenv("DB_LOCAL_PASSWORD"),
+		os.Getenv("DB_LOCAL_HOST"), os.Getenv("DB_LOCAL_PORT"), os.Getenv("DB_LOCAL_NAME"), false))
+	if err != nil {
+		t.Fatal(err)
+	}
 	config.Timeout, config.ReadTimeout, config.WriteTimeout = time.Second, imageDatabaseTimeout, imageDatabaseTimeout
 	database, err := gorm.Open(mysql.Open(config.FormatDSN()), &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: prefix}})
 	if err != nil {
@@ -60,6 +61,42 @@ func imageTestDatabase(t *testing.T, prefix string, connections int) *gorm.DB {
 		}
 	})
 	return database
+}
+
+func TestImageDatabaseConnectionsUseUTC(t *testing.T) {
+	database := imageTestDatabase(t, "ifk_review_test_", 2)
+	pool, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Hold both connections so the pool must open a second physical session.
+	for range 2 {
+		connection, connErr := pool.Conn(t.Context())
+		if connErr != nil {
+			t.Fatal(connErr)
+		}
+		t.Cleanup(func() {
+			if closeErr := connection.Close(); closeErr != nil {
+				t.Error(closeErr)
+			}
+		})
+		assertImageConnectionUTC(t, connection)
+	}
+}
+
+func assertImageConnectionUTC(t *testing.T, connection *sql.Conn) {
+	t.Helper()
+	var zone string
+	var current, utc, roundTrip time.Time
+	sample := time.Date(2026, time.November, 11, 15, 42, 56, 0, time.FixedZone("UTC+8", 8*60*60))
+	err := connection.QueryRowContext(t.Context(), "SELECT @@session.time_zone, CURRENT_TIMESTAMP, UTC_TIMESTAMP(), CAST(? AS DATETIME)", sample).
+		Scan(&zone, &current, &utc, &roundTrip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if zone != "+00:00" || !current.Equal(utc) || current.Location() != time.UTC || !roundTrip.Equal(sample) {
+		t.Fatalf("connection timezone mismatch: zone=%s current=%s utc=%s roundTrip=%s", zone, current, utc, roundTrip)
+	}
 }
 
 func imageTestStore(t *testing.T) *ImageStore {
@@ -197,19 +234,129 @@ func TestImageRecordIdentityIncludesContentURLAndModel(t *testing.T) {
 	imagePage(t, store, DefaultImageQuery(), 3)
 }
 
+func TestImageAnnotationsReplaceSameURL(t *testing.T) {
+	store := imageTestStore(t)
+	result := imageTestResult(t.Name(), 0.9)
+	saveTestImage(t, store, result)
+	result.PredictionSHA256 = strings.Repeat("c", 64)
+	result.Label = testImageInvalid
+	saveTestImage(t, store, result)
+	changedContent := imageTestResult("changed-content", 0.7)
+	changedContent.URL = result.URL
+	saveTestImage(t, store, changedContent)
+	otherURL := result
+	otherURL.URL += "?other"
+	saveTestImage(t, store, otherURL)
+	before := imagePage(t, store, DefaultImageQuery(), 4).Items
+	record := before[1]
+	for revision, label := range []string{testImageInvalid, testImageValid, testImageValid} {
+		if err := store.Annotate(t.Context(), record.ID, uint64(revision), label, "test-reviewer"); err != nil {
+			t.Fatal(err)
+		}
+		assertImageURLAnnotations(t, store, before, record.URL, label, uint64(revision+1))
+	}
+	if err := store.Annotate(t.Context(), before[2].ID, 0, testImageInvalid, "stale-reviewer"); !errors.Is(err, ErrImageConflict) {
+		t.Fatalf("stale sibling annotation must conflict: %v", err)
+	}
+	assertImageURLAnnotations(t, store, before, record.URL, testImageValid, 3)
+	saveTestImage(t, store, changedContent)
+	assertImageURLAnnotations(t, store, before, record.URL, testImageValid, 3)
+}
+
+func assertImageURLAnnotations(t *testing.T, store *ImageStore, before []ImagePrediction, url, label string, revision uint64) {
+	t.Helper()
+	after := imagePage(t, store, DefaultImageQuery(), len(before)).Items
+	var reviewedAt int64
+	for i, record := range after {
+		if record.URL == url && reviewedAt == 0 {
+			reviewedAt = record.ReviewedAt
+		}
+		expected := before[i]
+		expected.UpdatedAt = record.UpdatedAt
+		if expected.URL == url {
+			expected.Correction, expected.Revision = label, revision
+			expected.Reviewer, expected.ReviewedAt = "test-reviewer", reviewedAt
+		}
+		if record != expected {
+			t.Fatalf("unexpected annotation: got %+v, want %+v", record, expected)
+		}
+	}
+	if reviewedAt == 0 {
+		t.Fatal("annotation timestamp missing")
+	}
+}
+
+func TestImageURLAnnotationRollsBackSiblingFailure(t *testing.T) {
+	store := imageTestStore(t)
+	result := imageTestResult(t.Name(), 0.9)
+	saveTestImage(t, store, result)
+	result.PredictionSHA256 = strings.Repeat("c", 64)
+	saveTestImage(t, store, result)
+	before := imagePage(t, store, DefaultImageQuery(), 2).Items
+	updates := 0
+	const callback = "test_fail_sibling_annotation"
+	if err := store.database.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		updates++
+		if updates == 2 {
+			tx.Error = ErrImageStorage
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.database.Callback().Update().Remove(callback); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := store.Annotate(t.Context(), before[0].ID, 0, testImageInvalid, "test-reviewer"); !errors.Is(err, ErrImageStorage) {
+		t.Fatalf("expected sibling update failure: %v", err)
+	}
+	after := imagePage(t, store, DefaultImageQuery(), 2).Items
+	for i, original := range before {
+		if after[i] != original {
+			t.Fatalf("failed URL update did not roll back: got %+v, want %+v", after[i], original)
+		}
+	}
+}
+
 func TestConcurrentImageAnnotationsHaveOneWinner(t *testing.T) {
+	for _, sibling := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same-record", true: "same-url"}[sibling], func(t *testing.T) {
+			assertConcurrentImageAnnotations(t, sibling)
+		})
+	}
+}
+
+func assertConcurrentImageAnnotations(t *testing.T, sibling bool) {
+	t.Helper()
 	store := concurrentImageTestStore(t)
-	saveTestImage(t, store, imageTestResult(t.Name(), 0.9))
-	record := imagePage(t, store, DefaultImageQuery(), 1).Items[0]
+	result := imageTestResult(t.Name(), 0.9)
+	saveTestImage(t, store, result)
+	result.PredictionSHA256 = strings.Repeat("c", 64)
+	saveTestImage(t, store, result)
+	records := imagePage(t, store, DefaultImageQuery(), 2).Items
 	results := make(chan error, 2)
 	group := xutil.WaitGroup("image_annotation_test")
-	for _, label := range []string{testImageValid, testImageInvalid} {
+	for i, label := range []string{testImageValid, testImageInvalid} {
+		id := records[0].ID
+		if sibling {
+			id = records[i].ID
+		}
 		group.Go(t.Context(), func(ctx context.Context) {
-			results <- store.Annotate(ctx, record.ID, 0, label, "test-reviewer")
+			results <- store.Annotate(ctx, id, 0, label, "test-reviewer")
 		})
 	}
 	group.Wait()
 	close(results)
+	assertImageAnnotationWinners(t, results)
+	after := imagePage(t, store, DefaultImageQuery(), 2).Items
+	if after[0].Revision != 1 || after[1].Revision != 1 || after[0].Correction != after[1].Correction {
+		t.Fatalf("concurrent annotations diverged: %+v", after)
+	}
+}
+
+func assertImageAnnotationWinners(t *testing.T, results <-chan error) {
+	t.Helper()
 	winners, conflicts := 0, 0
 	for err := range results {
 		switch {

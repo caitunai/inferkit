@@ -104,6 +104,10 @@ export function createImageReviewApp(browser = window) {
       try {
         const data = await request(`/results/${id}`, { signal: activeController.signal });
         if (disposed || controller !== activeController) return;
+        const previous = this.items.find((item) => item.id === id);
+        if (previous && previous.url === data.record.url) {
+          this.syncAnnotation(previous, data.record.correction, data.record.revision - previous.revision);
+        }
         this[field] = data.record;
         this.items = this.items.map((item) => item.id === id ? data.record : item);
         delete this.brokenImages[id];
@@ -129,7 +133,13 @@ export function createImageReviewApp(browser = window) {
     async annotateList(record, label) {
       if (!await this.saveAnnotation(record, label)) return;
       if (this.modalRecord?.id === record.id) this.closeAnnotation();
-      if (this.activeFilters.review === "pending") this.items = this.items.filter((item) => item.id !== record.id);
+      if (this.activeFilters.review === "pending") this.items = this.items.filter((item) => item.url !== record.url);
+    },
+    syncAnnotation(record, label, revisionDelta = 1) {
+      for (const item of this.items) {
+        if (item.url === record.url && item.id !== record.id) { item.correction = label; item.revision += revisionDelta; }
+      }
+      record.correction = label; record.revision += revisionDelta;
     },
     async saveAnnotation(record, label) {
       if (this.busy || !record || disposed) return false;
@@ -142,7 +152,7 @@ export function createImageReviewApp(browser = window) {
           body: JSON.stringify({ label, revision: record.revision }), signal: activeController.signal,
         });
         if (disposed) return false;
-        record.correction = label; record.revision++;
+        this.syncAnnotation(record, label);
         this.notice = `已保存：${labelTitle(label)}`;
         return true;
       } catch (error) {

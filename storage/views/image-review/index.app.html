@@ -11,7 +11,7 @@
       <label class="review-field">排序<select x-model="filters.sort" :disabled="busy"><option value="newest">最新识别优先</option><option value="oldest">最早识别优先</option><option value="confidence_asc">置信度从低到高</option><option value="confidence_desc">置信度从高到低</option></select></label>
       <button class="review-button review-primary" type="submit" :disabled="busy" x-text="view === 'review' ? '开始本轮标注' : '应用筛选'"></button>
     </form>
-    <div class="review-error" role="alert" x-show="error" x-text="error"></div>
+    <div class="review-error" role="alert" x-show="error"><span x-text="error"></span><button x-show="view === 'list'" type="button" class="review-button" @click="loadPage(cursors.at(-1))" :disabled="busy">重新加载本页</button></div>
     <div class="review-notice" role="status" x-show="notice" x-text="notice"></div>
     <div class="review-empty" x-show="loading" role="status">正在加载识别记录…</div>
 
@@ -20,8 +20,8 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         <template x-for="record in items" :key="record.id">
           <article class="review-card">
-            <div class="review-photo"><img x-show="imageSource(record)" :src="imageSource(record) || undefined" @error="brokenImages[record.id] = true" loading="lazy" referrerpolicy="no-referrer" :alt="`识别图片 ${record.id}`"><span x-show="!imageSource(record)">图片暂不可用</span></div>
-            <div class="review-card-body"><div class="review-card-title"><span x-text="labelTitle(record.label)"></span><strong x-text="percent(record.confidence)"></strong></div><p><span class="review-badge" x-text="record.correction ? `人工：${labelTitle(record.correction)}` : '未标注'"></span></p><p x-text="dateLabel(record.created_at)"></p><a class="review-source" :href="safeImageURL(record.url) || undefined" target="_blank" rel="noopener noreferrer" :title="record.url" x-text="record.url"></a><div class="review-card-actions"><button type="button" class="review-button" @click="openAnnotation(record)" :disabled="busy" aria-haspopup="dialog">纠错标注</button><button type="button" class="review-button review-model" @click="acceptModel(record)" :disabled="busy">采用模型结果</button></div></div>
+            <button type="button" class="review-photo" @click="openAnnotation(record)" :disabled="busy || !imageSource(record)" aria-haspopup="dialog" :aria-label="`查看图片 ${record.id} 大图`"><img x-show="imageSource(record)" :src="imageSource(record) || undefined" @error="brokenImages[record.id] = true" loading="lazy" referrerpolicy="no-referrer" :alt="`识别图片 ${record.id}`"><span x-show="!imageSource(record)">图片暂不可用</span></button>
+            <div class="review-card-body"><div class="review-card-title"><span x-text="labelTitle(record.label)"></span><strong x-text="percent(record.confidence)"></strong></div><p><span class="review-badge" x-text="record.correction ? `人工：${labelTitle(record.correction)}` : '未标注'"></span></p><p x-text="dateLabel(record.created_at)"></p><a class="review-source" :href="safeImageURL(record.url) || undefined" target="_blank" rel="noopener noreferrer" :title="record.url" x-text="record.url"></a><div class="review-card-actions"><button type="button" class="review-button review-invalid" @click="annotateList(record, '0_invalid')" :disabled="busy">无效</button><button type="button" class="review-button review-valid" @click="annotateList(record, '1_valid')" :disabled="busy">有效</button><button type="button" class="review-button review-model" @click="acceptModel(record)" :disabled="busy">采用模型结果</button></div></div>
           </article>
         </template>
       </div>
@@ -44,7 +44,7 @@
     </section>
   </div>
   <dialog x-ref="annotationDialog" class="review-modal" aria-labelledby="review-modal-title" @cancel.prevent="closeAnnotation()" @click.self="closeAnnotation()">
-    <header class="review-modal-header"><h2 id="review-modal-title">纠错标注</h2><button type="button" class="review-modal-close" @click="closeAnnotation()" :disabled="saving" aria-label="关闭标注弹窗">×</button></header>
+    <header class="review-modal-header"><h2 id="review-modal-title">图片预览与审核</h2><button type="button" class="review-modal-close" @click="closeAnnotation()" :disabled="saving" aria-label="关闭图片预览">×</button></header>
     <template x-if="modalRecord">
       <div class="review-modal-body">
         <div class="review-modal-photo"><img x-show="modalImage" :src="modalImage || undefined" @error="brokenImages[modalRecord.id] = true" referrerpolicy="no-referrer" alt="待纠错图片"><span x-show="!modalImage">图片无法加载</span></div>

@@ -21,9 +21,9 @@ var (
 	ErrCloseConnection = errors.New("close database connection failed")
 )
 
+const mysqlConnectionParameters = "charset=utf8mb4&parseTime=True&loc=UTC&time_zone=%27%2B00%3A00%27"
+
 // Conn exposes the package's conn value.
-//
-//nolint:cyclop // This bounded database lifecycle keeps pool ownership and query classification explicit.
 func Conn() *gorm.DB {
 	dbMutex.Lock()
 
@@ -44,15 +44,11 @@ func Conn() *gorm.DB {
 		log.Fatal().Msg("mysql db config should not empty")
 		return nil
 	}
-	dsn := "%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=UTC"
-	if tls {
-		dsn += "&tls=true"
-	}
+	dsn := mysqlDSN(user, pass, host, port, dbname, tls)
 	prefix := viper.GetString("db.table.prefix")
 	if prefix != "" && !strings.HasSuffix(prefix, "_") {
 		prefix += "_"
 	}
-	dsn = fmt.Sprintf(dsn, user, pass, host, port, dbname)
 	var err error
 	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
 		DisableForeignKeyConstraintWhenMigrating: true,
@@ -70,6 +66,15 @@ func Conn() *gorm.DB {
 	database := db
 	dbMutex.Unlock()
 	return database
+}
+
+func mysqlDSN(user, password, host, port, database string, tls bool) string {
+	// loc controls Go decoding; time_zone also aligns each MySQL session with UTC.
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s", user, password, host, port, database, mysqlConnectionParameters)
+	if tls {
+		dsn += "&tls=true"
+	}
+	return dsn
 }
 
 // DB performs the db operation.

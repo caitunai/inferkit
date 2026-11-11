@@ -132,23 +132,54 @@ func imageReadError(err error) error {
 	return errors.Join(ErrImageStorage, err)
 }
 
-// Annotate changes only human-owned fields, with an optimistic concurrency check.
+// Annotate replaces human-owned fields for every prediction at the same URL.
 func (s *ImageStore) Annotate(ctx context.Context, id uint, revision uint64, label, reviewer string) error {
 	if !validImageAnnotation(label, reviewer) || revision > math.MaxInt64 {
 		return ErrImageQuery
 	}
 	ctx, cancel := context.WithTimeout(ctx, imageDatabaseTimeout)
 	defer cancel()
-	if _, err := s.Get(ctx, id); err != nil {
+	record, err := s.Get(ctx, id)
+	if err != nil {
 		return err
 	}
-	result := s.database.WithContext(ctx).Model(&ImagePrediction{}).Where("id = ? AND revision = ?", id, revision).
-		Updates(map[string]any{"correction": label, "reviewer": reviewer, "reviewed_at": time.Now().UnixMilli(), "revision": gorm.Expr("revision + 1")})
+	err = s.database.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return replaceImageURLAnnotation(tx, record, revision, label, reviewer)
+	})
+	if err != nil {
+		return errors.Join(ErrImageStorage, err)
+	}
+	return nil
+}
+
+func replaceImageURLAnnotation(tx *gorm.DB, record *ImagePrediction, revision uint64, label, reviewer string) error {
+	if err := lockImageAnnotationURL(tx, record.URLSHA256); err != nil {
+		return err
+	}
+	values := map[string]any{"correction": label, "reviewer": reviewer, "reviewed_at": time.Now().UnixMilli(), "revision": gorm.Expr("revision + 1")}
+	result := tx.Model(&ImagePrediction{}).Where("id = ? AND revision = ?", record.ID, revision).Updates(values)
 	if result.Error != nil {
 		return errors.Join(ErrImageStorage, result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return ErrImageConflict
+	}
+	if err := tx.Model(&ImagePrediction{}).Where("url_sha256 = ? AND id <> ?", record.URLSHA256, record.ID).Updates(values).Error; err != nil {
+		return errors.Join(ErrImageStorage, err)
+	}
+	return nil
+}
+
+// Lock the oldest row by primary key before any writes, even when different
+// model records are being reviewed. Prediction rows are never deleted or rekeyed.
+func lockImageAnnotationURL(tx *gorm.DB, urlSHA256 string) error {
+	var id uint
+	if err := tx.Model(&ImagePrediction{}).Select("MIN(id)").Where("url_sha256 = ?", urlSHA256).Scan(&id).Error; err != nil {
+		return errors.Join(ErrImageStorage, err)
+	}
+	var anchor ImagePrediction
+	if err := tx.Select("id").Clauses(clause.Locking{Strength: "UPDATE"}).First(&anchor, id).Error; err != nil {
+		return imageReadError(err)
 	}
 	return nil
 }

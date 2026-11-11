@@ -3,10 +3,28 @@ package db
 import (
 	"database/sql"
 	"testing"
+	"time"
 
+	mysqldriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+func TestMySQLDSNUsesUTC(t *testing.T) {
+	t.Parallel()
+	for _, tls := range []bool{false, true} {
+		config, err := mysqldriver.ParseDSN(mysqlDSN("user", "password", "127.0.0.1", "3306", "test", tls))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !config.ParseTime || config.Loc != time.UTC || config.Params["time_zone"] != "'+00:00'" {
+			t.Fatal("MySQL sessions and Go time decoding must both use UTC")
+		}
+		if (config.TLSConfig == "true") != tls {
+			t.Fatal("UTC connection options changed the TLS setting")
+		}
+	}
+}
 
 func TestCloseDisconnectsDatabasePool(t *testing.T) {
 	sqlDB, err := sql.Open("mysql", "user:password@tcp(127.0.0.1:1)/test")
