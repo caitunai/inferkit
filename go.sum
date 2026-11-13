@@ -53,8 +53,8 @@ github.com/gen2brain/gav1d v0.2.6 h1:7TSkrWTdE22k5Ul7vYZML7Nu80gNW6OovV7FSCITSE0
 github.com/gen2brain/gav1d v0.2.6/go.mod h1:ReFKjHq7pvRhEk+pgRPAo9gOlcrf51sdzVcAbbX7e0E=
 github.com/gin-contrib/cors v1.7.10 h1:psSUzREHu/qjLdH9j/+VYgAxll1/61rEoM5FhFf/2QE=
 github.com/gin-contrib/cors v1.7.10/go.mod h1:VJ2EOJXwnWuloSNs4nRKUPfwpJfqobjWiLaH8ezHM7c=
-github.com/gin-contrib/logger v1.2.10 h1:UslrdAYmiyxfDoLO+xjFnTWsVjgHHMZSQ3AT9J4CH9A=
-github.com/gin-contrib/logger v1.2.10/go.mod h1:hoi6NmUjCjvhcnvsYRvh/BzkYl0dMHe6qfwr3cv5TCM=
+github.com/gin-contrib/logger v1.2.11 h1:kvJP9XN1WcRaxqUQvhfkAJ/fs85GjPDTTdUnFb1u3gk=
+github.com/gin-contrib/logger v1.2.11/go.mod h1:535fYQv29peVbDtE9SMX8XFYViZodm+TZDiHEep9aAg=
 github.com/gin-contrib/requestid v1.0.9 h1:sgl++Hl71YtG0TMpCqqHwh6bxHS1a4wmJrTjB6a4Vws=
 github.com/gin-contrib/requestid v1.0.9/go.mod h1:oqcOEHmh3YO1A2s0jBpxldYOBNRkFDoDiBDBhO0um6M=
 github.com/gin-contrib/sse v1.2.0 h1:AeYPE9hukQvAU1y7+eNvTC67PuBLK4BOduG08yv7L28=
