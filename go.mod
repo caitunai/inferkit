@@ -25,7 +25,7 @@ require (
 	github.com/woozymasta/png v1.2.0
 	github.com/yalue/onnxruntime_go v1.38.0
 	golang.org/x/image v0.47.0
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	golang.org/x/sys v0.49.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.2
