@@ -51,8 +51,8 @@ github.com/gabriel-vasile/mimetype v1.4.16 h1:5izNFuvA37st1dDRAcA7TtmngBmRgiIPDm
 github.com/gabriel-vasile/mimetype v1.4.16/go.mod h1:3oFFwxX8kTklZwzIl2aQEDZT0lKY8xH92ST88bAwba4=
 github.com/gen2brain/gav1d v0.2.6 h1:7TSkrWTdE22k5Ul7vYZML7Nu80gNW6OovV7FSCITSE0=
 github.com/gen2brain/gav1d v0.2.6/go.mod h1:ReFKjHq7pvRhEk+pgRPAo9gOlcrf51sdzVcAbbX7e0E=
-github.com/gin-contrib/cors v1.7.10 h1:psSUzREHu/qjLdH9j/+VYgAxll1/61rEoM5FhFf/2QE=
-github.com/gin-contrib/cors v1.7.10/go.mod h1:VJ2EOJXwnWuloSNs4nRKUPfwpJfqobjWiLaH8ezHM7c=
+github.com/gin-contrib/cors v1.7.11 h1:x9saJz6JTX5ptFCxuxu3679Gva0VG5hEx2D/NQqUVJs=
+github.com/gin-contrib/cors v1.7.11/go.mod h1:rRuFhi164VfG88NyDi5ME/JHW8nCATRzV/VViLpvd6U=
 github.com/gin-contrib/logger v1.2.10 h1:UslrdAYmiyxfDoLO+xjFnTWsVjgHHMZSQ3AT9J4CH9A=
 github.com/gin-contrib/logger v1.2.10/go.mod h1:hoi6NmUjCjvhcnvsYRvh/BzkYl0dMHe6qfwr3cv5TCM=
 github.com/gin-contrib/requestid v1.0.9 h1:sgl++Hl71YtG0TMpCqqHwh6bxHS1a4wmJrTjB6a4Vws=

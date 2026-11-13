@@ -9,7 +9,7 @@ require (
 	github.com/ThreeDotsLabs/watermill v1.5.3
 	github.com/ThreeDotsLabs/watermill-redisstream v1.4.5
 	github.com/gen2brain/gav1d v0.2.6
-	github.com/gin-contrib/cors v1.7.10
+	github.com/gin-contrib/cors v1.7.11
 	github.com/gin-contrib/logger v1.2.10
 	github.com/gin-contrib/requestid v1.0.9
 	github.com/gin-gonic/gin v1.12.0
