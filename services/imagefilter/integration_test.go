@@ -3,6 +3,8 @@ package imagefilter
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -135,6 +137,7 @@ func TestNativeFixtures(t *testing.T) {
 }
 
 func TestNativeCacheIsolationAndFileURLPrecedence(t *testing.T) {
+	const mutated = "mutated"
 	s := nativeService(t)
 	data := nativeImage(t, s)
 	first, err := s.Check(t.Context(), Source{Reader: bytes.NewReader(data), URL: "https://127.0.0.1/metadata"})
@@ -152,12 +155,13 @@ func TestNativeCacheIsolationAndFileURLPrecedence(t *testing.T) {
 		}
 	}()
 	want := first.Confidence
-	first.Labels[0], first.Probabilities[0] = "mutated", -1
+	first.Labels[0], first.Probabilities[0] = mutated, -1
+	first.ClassMapping[0].Name = mutated
 	second, err := s.Check(t.Context(), Source{Reader: bytes.NewReader(data), URL: "https://example.com/other"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Confidence != want || second.Labels[0] == "mutated" || second.Probabilities[0] < 0 || second.URL != "https://example.com/other" {
+	if second.Confidence != want || second.Labels[0] == mutated || second.Probabilities[0] < 0 || second.URL != "https://example.com/other" || second.ClassMapping[0].Name == mutated {
 		t.Fatalf("mutable cache or URL leakage: %+v", second)
 	}
 }
@@ -251,5 +255,22 @@ func benchmarkCheck(b *testing.B, cached bool) {
 		if _, checkErr := s.Check(b.Context(), Source{Reader: bytes.NewReader(data)}); checkErr != nil {
 			b.Fatal(checkErr)
 		}
+	}
+}
+
+func TestNativeHistoricalRecheckBypassesCachedPrediction(t *testing.T) {
+	service := nativeService(t)
+	data := formatFixture(t, "sample.jpeg")
+	digest := sha256.Sum256(data)
+	key := hex.EncodeToString(digest[:])
+	_, pending, _ := service.cache.begin(key)
+	service.cache.finish(key, pending, Result{Label: "synthetic-cache-entry", SHA256: key}, nil)
+	before := service.engine.runs.Load()
+	result, err := service.Recheck(t.Context(), Source{Reader: bytes.NewReader(data)}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Label == "synthetic-cache-entry" || result.SHA256 != key || service.engine.runs.Load() != before+1 {
+		t.Fatal("historical recheck reused cache instead of model inference", result)
 	}
 }

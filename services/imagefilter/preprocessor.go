@@ -38,8 +38,10 @@ func ParseBackend(value string) (Backend, error) {
 // Detector borrows one service's session, resource budget and bounded cache.
 // Its backend is immutable; only the owning Service closes native resources.
 type Detector struct {
-	service *Service
-	backend Backend
+	service     *Service
+	backend     Backend
+	expectedSHA string
+	fresh       bool
 }
 
 // WithBackend creates a lightweight request adapter, not another model session.

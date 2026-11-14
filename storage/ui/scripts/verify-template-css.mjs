@@ -42,9 +42,13 @@ console.log("Verified image filter layout and accessibility utilities.");
 const reviewEntry = manifest["src/image-review/main.js"];
 if (!reviewEntry?.css?.length) throw new Error("Image review entry is missing its stylesheet");
 const reviewCSS = (await Promise.all(reviewEntry.css.map((file) => readFile(resolve("dist", file), "utf8")))).join("\n");
-for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".sm\\:grid-cols-2{", ".xl\\:grid-cols-4{", ".review-single", ".review-filters", ".review-stage", ".review-labels", ".review-choice", ".review-invalid", ".review-valid", ".review-model", ".review-modal::backdrop", ".review-card-actions"]) {
+for (const selector of [".grid-cols-1{", ".lg\\:grid-cols-2{", ".sm\\:grid-cols-2{", ".xl\\:grid-cols-4{", ".review-single", ".review-filters", ".review-stage", ".review-labels", ".review-choice", ".review-model", ".review-modal::backdrop", ".review-card-actions", ".review-selected", ".review-shortcut", ".review-adopt"]) {
   if (!reviewCSS.includes(selector)) throw new Error(`Image review CSS is missing ${selector}`);
 }
+const cardActionsRule = reviewCSS.match(/\.review-card-actions\{([^}]+)\}/)?.[1];
+if (!cardActionsRule?.includes("display:grid") || !cardActionsRule.includes("grid-template-columns:repeat(3,")) throw new Error("Review cards must provide a compact three-column classification grid");
+const reviewLabelsRule = reviewCSS.match(/\.review-labels\{([^}]+)\}/)?.[1];
+if (!reviewLabelsRule?.includes("grid-template-columns:repeat(3,")) throw new Error("Single-image and modal classification controls must use three columns");
 console.log("Verified image review gallery and single-image annotation styles.");
 const toastRule = reviewCSS.match(/\.review-toast-region\{([^}]+)\}/)?.[1];
 if (!toastRule?.includes("position:fixed")) throw new Error("Image review toast must stay outside the page layout");

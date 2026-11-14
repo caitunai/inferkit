@@ -25,18 +25,20 @@ import (
 	"github.com/caitun/inferkit/services/imagefilter"
 	"github.com/caitun/inferkit/services/ocr"
 	"github.com/caitun/inferkit/services/pulse"
+	"github.com/caitun/inferkit/services/reclassify"
 	"github.com/caitun/inferkit/xutil"
 )
 
 // Server represents server data.
 type Server struct {
-	ImageFilter         *imagefilter.Service
-	OCR                 *ocr.Service
-	ImageRecords        *db.ImageStore
-	Pulse               *pulse.Client
-	Port                string
-	Mode                string
-	CollectImageResults bool
+	ImageFilter           *imagefilter.Service
+	OCR                   *ocr.Service
+	ImageRecords          *db.ImageStore
+	ImageReclassification *reclassify.Service
+	Pulse                 *pulse.Client
+	Port                  string
+	Mode                  string
+	CollectImageResults   bool
 }
 
 const (
@@ -52,6 +54,7 @@ func NewServer(port, mode string) *Server {
 
 // Start starts the service lifecycle.
 func (s *Server) Start(ctx context.Context) {
+	defer s.closeImageReclassification()
 	r := s.newRouter() //nolint:contextcheck // Router setup only registers callbacks; their contexts come from incoming HTTP requests, not the server lifecycle.
 	srv := &http.Server{
 		Addr:              ":" + s.Port,
@@ -69,6 +72,7 @@ func (s *Server) Start(ctx context.Context) {
 	shutdownContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	<-shutdownContext.Done()
+	s.ImageReclassification.Stop()
 
 	log.Info().Msg("Shutting down server...")
 	shutdownTimeout := configuredDuration("server.shutdownTimeout", defaultShutdownTimeout)
@@ -81,6 +85,12 @@ func (s *Server) Start(ctx context.Context) {
 	}
 
 	log.Info().Msg("Server exiting")
+}
+
+func (s *Server) closeImageReclassification() {
+	if err := s.ImageReclassification.Close(); err != nil {
+		log.Error().Err(err).Msg("close image reclassification worker")
+	}
 }
 
 func startServerTask(ctx context.Context, task xutil.Task) {
@@ -128,7 +138,7 @@ func (s *Server) newRouter() *gin.Engine {
 		},
 		MaxAge: 12 * time.Hour,
 	}))
-	route.InitRoute(base.NewRouter(r), s.ImageFilter, s.ImageRecords, s.CollectImageResults, s.OCR, s.Pulse)
+	route.InitRoute(base.NewRouter(r), s.ImageFilter, s.ImageRecords, s.CollectImageResults, s.OCR, s.Pulse, s.ImageReclassification)
 	r.HTMLRender = base.NewRender()
 	return r
 }

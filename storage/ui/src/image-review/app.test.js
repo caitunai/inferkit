@@ -3,6 +3,7 @@ import test from "node:test";
 import { createImageReviewApp } from "./app.js";
 import { filtersFromURL, queryParams, safeImageURL } from "./query.js";
 
+const labels = ["00_invalid", "01_valid", "03_childish", "04_paper", "05_other_app", "06_professional", "07_stolen", "08_screenshot", "09_sensitive", "10_photo"];
 const record = (id = 1) => ({ id, url: `https://example.com/${id}.png`, confidence: 0.8, revision: 0, label: "1_valid" });
 function setup(view = "review", responses = []) {
   const requests = [], timers = new Map();
@@ -15,7 +16,7 @@ function setup(view = "review", responses = []) {
     const response = responses.shift() || { status: 0, data: { page: { items: [], has_more: false } } };
     return { ok: response.status === 0, status: response.status || 200, json: async () => response };
   } };
-  const app = createImageReviewApp(browser); app.$el = { dataset: { view } };
+  const app = createImageReviewApp(browser); app.$el = { dataset: { view, labels: labels.join(" ") } };
   const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
   app.$refs = { annotationDialog: dialog }; app.$nextTick = async () => {};
   return { app, requests, browser, dialog, timers };
@@ -85,7 +86,7 @@ test("list paging only reads records", async () => {
   app.destroy();
 });
 
-test("skipping adopts the model prediction and advances only after saving", async () => {
+test("adopting the model saves a reviewed label and advances only after success", async () => {
   const first = record(1);
   const { app, requests } = setup("review", [page([first]), { status: 0, data: { saved: true } }, page([record(2)])]);
   await app.init(); await app.acceptModel();
@@ -151,13 +152,13 @@ test("card results use one success toast whose timeout resets after each save", 
   const { app, timers } = setup("list", [page([record()]), saved(), saved(), saved()]);
   await app.init();
   for (const [label, action] of [
-    ["无效图片", () => app.annotateList(app.items[0], "0_invalid")],
-    ["有效图片", () => app.annotateList(app.items[0], "1_valid")],
-    ["有效图片", () => app.acceptModel(app.items[0])],
+    ["已保存：无效图片", () => app.annotateList(app.items[0], "0_invalid")],
+    ["已保存：有效图片", () => app.annotateList(app.items[0], "1_valid")],
+    ["已采用模型结果：有效图片", () => app.acceptModel(app.items[0])],
   ]) {
     const previousTimer = timers.keys().next().value;
     await action();
-    assert.deepEqual(app.toast, { message: `已保存：${label}`, type: "success" });
+    assert.deepEqual(app.toast, { message: label, type: "success" });
     assert.equal(timers.size, 1);
     assert.equal(timers.has(previousTimer), false);
   }
@@ -343,5 +344,109 @@ test("double clicks cannot issue concurrent annotation writes", async () => {
   assert.equal(calls, 1);
   finish(); await pending;
   assert.equal(app.saving, false);
+  app.destroy();
+});
+
+test("each gallery category saves directly without a dialog or list reload", async () => {
+  for (const label of labels) {
+    const first = { ...record(), correction: "01_valid", revision: 3 };
+    const { app, requests, dialog } = setup("list", [page([first]), { status: 0, data: { saved: true } }]);
+    await app.init(); await app.annotateList(first, label);
+    assert.deepEqual(JSON.parse(requests[1].options.body), { label, revision: 3 });
+    assert.equal(requests.length, 2); assert.equal(dialog.open, false);
+    assert.equal(app.items[0].correction, label); assert.equal(app.items[0].label, "1_valid");
+    assert.equal(app.annotationSelected(first, label), true); assert.equal(app.annotationClass(first, label)["review-selected"], true);
+    app.destroy();
+  }
+});
+
+test("legacy human labels highlight their matching new classification buttons", () => {
+  const { app } = setup("list");
+  assert.equal(app.annotationSelected({ correction: "0_invalid" }, "00_invalid"), true);
+  assert.equal(app.annotationSelected({ correction: "1_valid" }, "01_valid"), true);
+  assert.equal(app.annotationSelected({ correction: "03_childish" }, "01_valid"), false);
+  app.destroy();
+});
+
+function shortcut(key, extra = {}) {
+  return { key, prevented: false, preventDefault() { this.prevented = true; }, target: { closest: () => null }, ...extra };
+}
+
+test("number shortcuts save all ten categories and advance after saving", async () => {
+  for (const [index, label] of labels.entries()) {
+    const { app, requests } = setup("review", [page([record(1)]), { status: 0, data: { saved: true } }, page([record(2)])]);
+    await app.init();
+    const event = shortcut(String((index + 1) % 10));
+    assert.equal(app.labelShortcut(label), event.key);
+    await app.handleShortcut(event);
+    assert.equal(event.prevented, true);
+    assert.equal(JSON.parse(requests[1].options.body).label, label);
+    assert.equal(app.current.id, 2); assert.equal(app.reviewedCount, 1);
+    app.destroy();
+  }
+});
+
+test("Enter explicitly adopts a multiclass prediction and marks the record reviewed", async () => {
+  const first = { ...record(1), label: "08_screenshot", correction: "01_valid", revision: 4 };
+  const { app, requests } = setup("review", [page([first]), { status: 0, data: { saved: true } }, page([record(2)])]);
+  await app.init(); await app.handleShortcut(shortcut("Enter"));
+  assert.deepEqual(JSON.parse(requests[1].options.body), { label: "08_screenshot", revision: 4 });
+  assert.equal(first.correction, "08_screenshot"); assert.equal(first.revision, 5);
+  assert.equal(app.current.id, 2); assert.equal(app.toast.message, "已采用模型结果：截图");
+  app.destroy();
+});
+
+test("shortcuts do not annotate while editing, composing, repeating or using modifiers", async () => {
+  const { app, requests } = setup("review", [page([record()])]); await app.init();
+  for (const extra of [{ target: { closest: () => ({}) } }, { repeat: true }, { isComposing: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { defaultPrevented: true }]) {
+    for (const key of ["1", "Enter"]) await app.handleShortcut(shortcut(key, extra));
+  }
+  app.loading = true; await app.handleShortcut(shortcut("Enter")); app.loading = false;
+  app.modalRecord = record(); await app.handleShortcut(shortcut("1")); app.modalRecord = null;
+  app.view = "list"; await app.handleShortcut(shortcut("1"));
+  assert.equal(requests.length, 1); assert.equal(app.reviewedCount, 0); app.destroy();
+});
+
+test("rapid shortcut presses cannot duplicate model adoption while a save is pending", async () => {
+  const { app, browser } = setup("review", [page([record()])]); await app.init();
+  let finish; let writes = 0;
+  browser.fetch = async () => {
+    writes++; await new Promise((resolve) => { finish = resolve; });
+    return { ok: false, status: 409, json: async () => ({ message: "标注冲突" }) };
+  };
+  const pending = app.handleShortcut(shortcut("Enter"));
+  await app.handleShortcut(shortcut("Enter")); await app.handleShortcut(shortcut("3"));
+  assert.equal(writes, 1); finish(); await pending;
+  assert.equal(app.current.id, 1); assert.equal(app.current.revision, 0); assert.equal(app.reviewedCount, 0);
+  app.destroy();
+});
+
+test("only the human classification is highlighted, falling back to model predictions when unreviewed", () => {
+  const { app } = setup("list");
+  for (const [item, expected] of [
+    [{ label: "00_invalid" }, "00_invalid"],
+    [{ label: "01_valid", correction: "" }, "01_valid"],
+    [{ label: "00_invalid", correction: "03_childish" }, "03_childish"],
+    [{ label: "10_photo", correction: "01_valid" }, "01_valid"],
+    [{ label: "1_valid" }, "01_valid"],
+    [{ label: "0_invalid", correction: "1_valid" }, "01_valid"],
+  ]) {
+    assert.deepEqual(labels.filter((label) => app.annotationSelected(item, label)), [expected]);
+    for (const label of labels) assert.deepEqual(app.annotationClass(item, label), { "review-selected": label === expected });
+  }
+  assert.equal(app.annotationSelected(null, "00_invalid"), false);
+  app.destroy();
+});
+
+test("failed correction keeps the model highlighted until a human annotation is saved", async () => {
+  const first = { ...record(), label: "08_screenshot", correction: "" };
+  const { app } = setup("list", [page([first]), { status: 503, message: "保存失败" }, { status: 0, data: { saved: true } }]);
+  await app.init(); await app.annotateList(first, "10_photo");
+  assert.equal(app.annotationSelected(first, "08_screenshot"), true);
+  assert.equal(app.annotationSelected(first, "10_photo"), false);
+  await app.annotateList(first, "10_photo");
+  assert.equal(app.annotationSelected(first, "10_photo"), true);
+  assert.equal(app.annotationSelected(first, "08_screenshot"), false);
+  assert.equal(first.label, "08_screenshot");
   app.destroy();
 });

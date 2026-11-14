@@ -64,3 +64,23 @@ func TestSharedTimingPreservesCancellation(t *testing.T) {
 		t.Fatalf("canceled wait not measured: %+v", fields)
 	}
 }
+
+func TestRecheckGuardsHistoricalContentBeforeCachedInference(t *testing.T) {
+	t.Parallel()
+	data := []byte("cached historical image")
+	digest := sha256.Sum256(data)
+	key := hex.EncodeToString(digest[:])
+	config := Config{Timeout: time.Second, CacheTTL: time.Minute, CacheEntries: 1, MaxBytes: 1024}
+	service := &Service{config: config, requests: make(chan struct{}, 2), cache: newResultStore(config)}
+	_, pending, _ := service.cache.begin(key)
+	service.cache.finish(key, pending, Result{Label: "historical-cached-result", SHA256: key}, nil)
+	other := sha256.Sum256([]byte("different historical bytes"))
+	if _, err := service.Recheck(t.Context(), Source{Reader: bytes.NewReader(data)}, hex.EncodeToString(other[:])); !errors.Is(err, ErrContentChanged) {
+		t.Fatal("cached content bypassed source identity", err)
+	}
+	service.requests <- struct{}{}
+	if _, err := service.Recheck(t.Context(), Source{Reader: bytes.NewReader(data)}, key); !errors.Is(err, ErrBusy) {
+		t.Fatal("background did not yield", err)
+	}
+	<-service.requests
+}

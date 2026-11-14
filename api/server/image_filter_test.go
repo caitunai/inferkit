@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json/v2"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -47,10 +48,31 @@ func TestImageFilterAuthenticatedAPIIntegration(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer "+token)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"label":"0_invalid"`) {
+	assertClassificationResponse(t, response)
+	assertImageFilterFormats(t, router, token)
+}
+
+func assertClassificationResponse(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusOK {
 		t.Fatalf("classification: %d %s", response.Code, response.Body)
 	}
-	assertImageFilterFormats(t, router, token)
+	var body struct {
+		Data struct {
+			Result imagefilter.Result `json:"result"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	r := body.Data.Result
+	if r.ClassID < 0 || r.ClassID >= len(r.Labels) || len(r.ClassMapping) != len(r.Labels) {
+		t.Fatal("incomplete classification metadata")
+	}
+	c := r.ClassMapping[r.ClassID]
+	if r.Label != r.Labels[r.ClassID] || r.LabelID != c.LabelID || r.ClassName != c.Name {
+		t.Fatal("output index and business label metadata diverged")
+	}
 }
 
 func assertBackendAuthorization(t *testing.T, router http.Handler) {

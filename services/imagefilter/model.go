@@ -26,7 +26,9 @@ type manifest struct {
 	Model         string         `json:"model"`
 	SHA256        string         `json:"sha256"`
 	Precision     string         `json:"precision"`
+	LabelProfile  string         `json:"label_profile"`
 	Labels        []string       `json:"labels"`
+	ClassMapping  []Class        `json:"class_mapping"`
 	Input         node           `json:"input"`
 	Output        node           `json:"output"`
 	Preprocessing preprocessing  `json:"preprocessing"`
@@ -81,6 +83,9 @@ func loadModel(dir string) (*manifest, []byte, error) {
 	if err := readJSON(filepath.Join(dir, "labels.json"), &labels); err != nil {
 		return nil, nil, err
 	}
+	if err := m.readClassMapping(dir); err != nil {
+		return nil, nil, err
+	}
 	if err := m.validate(labels); err != nil {
 		return nil, nil, err
 	}
@@ -113,12 +118,19 @@ func (m *manifest) validate(labels []string) error {
 	if m.Training != nil && *m.Training != m.Preprocessing {
 		return ErrModel
 	}
-	return errors.Join(validateLabels(labels, m.Labels), m.Input.validateInput(), m.Output.validateOutput(), m.Preprocessing.validate())
+	return errors.Join(validateLabels(labels, m.Labels), m.validateClasses(), m.Input.validateInput(), m.Output.validateOutput(len(labels)), m.Preprocessing.validate())
 }
 
 func validateLabels(labels, expected []string) error {
-	if len(labels) != 2 || !slices.Equal(labels, expected) || labels[0] == "" || labels[1] == "" || labels[0] == labels[1] {
+	if len(labels) < 2 || len(labels) > maxClasses || !slices.Equal(labels, expected) {
 		return ErrModel
+	}
+	seen := make(map[string]bool, len(labels))
+	for _, label := range labels {
+		if label == "" || len(label) > 128 || seen[label] {
+			return ErrModel
+		}
+		seen[label] = true
 	}
 	return nil
 }
@@ -130,11 +142,11 @@ func (n node) validateInput() error {
 	return nil
 }
 
-func (n node) validateOutput() error {
+func (n node) validateOutput(classes int) error {
 	if n.Name == "" || n.DType != "float32" || n.Kind != "probabilities" || !n.Softmax {
 		return ErrModel
 	}
-	if !slices.Equal(n.Shape, []int64{1, 2}) {
+	if !slices.Equal(n.Shape, []int64{1, int64(classes)}) {
 		return ErrModel
 	}
 	return nil

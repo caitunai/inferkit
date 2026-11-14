@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"math"
-	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -31,7 +30,7 @@ var (
 
 const imageDatabaseTimeout = 5 * time.Second
 
-// ImagePrediction preserves immutable inference data and a separate human label.
+// ImagePrediction keeps source identity and human annotations separate from predictions.
 type ImagePrediction struct {
 	CreatedAt   time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt   time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
@@ -185,5 +184,5 @@ func lockImageAnnotationURL(tx *gorm.DB, urlSHA256 string) error {
 }
 
 func validImageAnnotation(label, reviewer string) bool {
-	return slices.Contains(imagereview.Labels(), label) && reviewer != "" && utf8.ValidString(reviewer) && utf8.RuneCountInString(reviewer) <= 128
+	return imagereview.ValidLabel(label) && reviewer != "" && utf8.ValidString(reviewer) && utf8.RuneCountInString(reviewer) <= 128
 }

@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "../shared/workbench.css";
 
+.classification.is-category { background: #eff4fa; color: #385f85; border: 1px solid #dce6f0; }
+.result-badge.category { background: #eaf1faed; color: #385f85; }
+
 .backend-selector { margin-bottom: 18px; padding: 14px; border: 1px solid #e3e8e3; border-radius: 8px; background: #f8faf8; }
 .backend-selector label { font-size: 11px; font-weight: 600; color: #546c58; }
 .backend-selector select { display: block; width: 100%; min-width: 0; min-height: 40px; margin-block: 8px; padding: 0 10px; border: 1px solid #dfe5e2; border-radius: 6px; background: #fff; color: #405148; font-size: 12px; }

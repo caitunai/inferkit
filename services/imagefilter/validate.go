@@ -26,8 +26,9 @@ type validationFile struct {
 type validationSample struct {
 	SourceFile    string    `json:"source_file"`
 	InputFile     string    `json:"input_file"`
+	ClassID       *int      `json:"class_id,omitempty"`
+	ClassIndex    *int      `json:"class_index,omitempty"`
 	Probabilities []float32 `json:"onnx_probabilities"`
-	ClassID       int       `json:"class_id"`
 }
 
 // Validation reports both inference-only and full image-pipeline comparisons.
@@ -60,7 +61,7 @@ func (d Detector) Validate(ctx context.Context) ([]Validation, error) {
 	if err := readJSON(filepath.Join(s.config.Model, "validation.json"), &file); err != nil {
 		return nil, err
 	}
-	if err := file.validate(); err != nil {
+	if err := file.validate(len(s.labels)); err != nil {
 		return nil, err
 	}
 	results := make([]Validation, 0, len(file.Samples))
@@ -161,7 +162,7 @@ func probabilityDifference(result Result, sample validationSample, file validati
 	if len(result.Probabilities) != len(sample.Probabilities) {
 		return 0, false
 	}
-	passed := result.ClassID == sample.ClassID
+	passed := result.ClassID == sample.index()
 	var maximum float64
 	for i, p := range result.Probabilities {
 		want := float64(sample.Probabilities[i])
@@ -172,9 +173,34 @@ func probabilityDifference(result Result, sample validationSample, file validati
 	return maximum, passed
 }
 
-func (v validationFile) validate() error {
+func (v validationFile) validate(classes int) error {
 	if len(v.Samples) == 0 || len(v.Samples) > 1024 || v.ATol < 0 || v.ATol > 0.001 || v.RTol < 0 || v.RTol > 0.01 {
 		return ErrValidation
 	}
+	for _, sample := range v.Samples {
+		if err := sample.validate(classes); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (s validationSample) validate(classes int) error {
+	if s.ClassIndex != nil && s.ClassID != nil && *s.ClassIndex != *s.ClassID {
+		return ErrValidation
+	}
+	if s.index() < 0 || s.index() >= classes || len(s.Probabilities) != classes {
+		return ErrValidation
+	}
+	return nil
+}
+
+func (s validationSample) index() int {
+	if s.ClassIndex != nil {
+		return *s.ClassIndex
+	}
+	if s.ClassID != nil {
+		return *s.ClassID
+	}
+	return -1
 }

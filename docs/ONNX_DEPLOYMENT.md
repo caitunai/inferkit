@@ -53,12 +53,16 @@ exports/artwork_fp32/
 | 通道顺序 | R、G、B |
 | 数值范围 | `[0,1]`，8 位像素除以 255 |
 | 输出节点名 | 读取 `deployment.json` 的 `output.name`，通常是 `output0` |
-| 输出形状 | `[1,2]`，float32 类别概率 |
+| 输出形状 | `[1,N]`，float32 类别概率；当前模型 N=10 |
 | 类别顺序 | 按 `labels.json` 读取，不能依据业务名称自行重排 |
 | 决策 | 取概率最大值的索引，再查询类别名称 |
 | 后处理 | 输出已经包含 Softmax，不要再次执行 Softmax；无需 NMS 或检测框解析 |
 
-本项目权重通常对应索引 0 为 `0_invalid`，索引 1 为 `1_valid`，以实际导出的 labels 为准。置信度就是最大类别概率；如果业务需要人工复核，可以在客户端设置门槛，当前网页的 0.8 只作为起始配置，不包含在 ONNX 内。
+分类数量以实际导出的 `labels` 和输出维度为准。当前 artwork 模型为十分类，输出 `[1,10]`；`class_id` 始终是从零开始的概率数组索引，业务编号另由 `class_mapping` 中的 `label_id` 定义。例如索引 2 对应 `03_childish`，业务编号为 3；索引 9 对应 `10_photo`，业务编号为 10。不要把数组索引直接作为业务编号。置信度仍是最大类别概率，ONNX 已包含 Softmax，Go 不再重复执行。
+
+多分类模型包需包含完整的 `class_mapping`（可嵌入 `deployment.json` 或放在 `class_mapping.json`）；两处同时存在时必须一致。每项的 `index`、`class` 必须与 `labels` 顺序一致，`label_id` 必须唯一，`name` 为展示名称。启动时检查标签重复、类别数量、输出宽度和映射一致性；支持 2–256 类，缺少映射的历史二分类包继续按旧索引兼容，多分类不会猜测业务编号。
+
+CLI/API 响应增加 `label_id`、`class_name`、`class_mapping` 及导出包提供的 `label_profile`，原 `label`、`class_id`、`confidence`、`labels`、`probabilities` 字段保持原语义。十类概率按模型顺序完整输出。输入仍是 `[1,3,320,320]`，libvips 训练前处理规则不变。
 
 ## 图片预处理必须一致
 
@@ -80,7 +84,7 @@ Go 端应使用与导出配置匹配的 libvips 版本、codec 和 thumbnail_buf
 
 Go 可以通过 ONNX Runtime C API 的 Go 绑定加载模型，例如第三方项目 [onnxruntime_go](https://github.com/yalue/onnxruntime_go)。它不是 Microsoft 官方 Go SDK；部署时还需要对应系统及 CPU 架构的 ONNX Runtime 原生动态库，并按绑定项目要求匹配库版本和构建环境。
 
-初始化时读取模型、labels 和真实输入输出节点名，创建并复用推理会话。每次请求提供 `[1,3,320,320]` 的 float32 输入，读取 `[1,2]` 概率。该文件固定 batch=1，多个请求可按所选绑定的并发和内存管理约定处理；不能直接塞入 batch>1 的张量。
+初始化时读取模型、labels、类别映射和真实输入输出节点名，创建并复用推理会话。每次请求提供 `[1,3,320,320]` 的 float32 输入，读取 `[1,N]` 概率，当前模型 N=10。该文件固定 batch=1，多个请求可按所选绑定的并发和内存管理约定处理；不能直接塞入 batch>1 的张量。
 
 ## Android / iOS 接入
 

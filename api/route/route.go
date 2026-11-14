@@ -9,10 +9,11 @@ import (
 	"github.com/caitun/inferkit/services/imagefilter"
 	"github.com/caitun/inferkit/services/ocr"
 	"github.com/caitun/inferkit/services/pulse"
+	"github.com/caitun/inferkit/services/reclassify"
 )
 
 // InitRoute performs the init route operation.
-func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service, reporter EventReporter) {
+func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageStore, collect bool, recognizer *ocr.Service, reporter EventReporter, tasks *reclassify.Service) {
 	InitMiddleware()
 	r.Use(AttemptAuth())
 	r.Use(PageNavigation(filter != nil, recognizer != nil, records != nil && imageReviewAuth != nil))
@@ -25,11 +26,11 @@ func InitRoute(r *base.Router, filter *imagefilter.Service, records *db.ImageSto
 		r.GET("/ocr", handler.OCRPage(recognizer))
 	}
 	initConfigCenterHandler(r)
-	initImageReviewHandler(r, records)
+	initImageReviewHandler(r, records, tasks)
 	initAPIHandler(r, filter, records, collect, recognizer, reporter)
 }
 
-func initImageReviewHandler(r *base.Router, records *db.ImageStore) {
+func initImageReviewHandler(r *base.Router, records *db.ImageStore, tasks *reclassify.Service) {
 	if records == nil || imageReviewAuth == nil {
 		return
 	}
@@ -38,6 +39,12 @@ func initImageReviewHandler(r *base.Router, records *db.ImageStore) {
 	review.GET("", handler.ImageReviewPage(false))
 	review.GET("/review", handler.ImageReviewPage(true))
 	handler.ImageReviewControl(review.Group("/api"), records)
+	review.GET("/reclassify", handler.ImageReclassificationPage())
+	var controller handler.ReclassificationController
+	if tasks != nil {
+		controller = tasks
+	}
+	handler.ImageReclassificationControl(review.Group("/api/reclassification"), controller)
 }
 
 func initPackageHandler(r *base.Router) {

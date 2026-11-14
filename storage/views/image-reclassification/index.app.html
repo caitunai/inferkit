@@ -1,0 +1,28 @@
+{{ define "content" }}
+<main x-data="reclassificationApp()" x-cloak>
+  <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-review">识别记录</a><a href="/image-review/review">逐张标注</a><a href="/image-review/reclassify" aria-current="page">历史重新分类</a></nav></div></header>
+  <div class="review-width reclassify-page">
+    <div class="review-heading"><h1>历史图片重新分类</h1><p>使用当前加载的模型逐张重新检测，覆盖预测标签和置信度，保留人工标注。</p></div>
+    <p class="reclassify-notice">生产维护任务：全程单张处理，遇到前台图片请求会等待。开始时固定记录范围，之后新增的记录不纳入本轮。关闭页面后继续运行；服务重启后暂停，需手动继续。</p>
+    <p class="reclassify-error" x-show="error" x-text="error" role="alert"></p>
+    <section class="reclassify-panel" aria-label="任务进度" aria-live="polite">
+      <div class="reclassify-heading"><h2 x-text="statusLabel"></h2><span x-text="`任务 #${state.job_id || '—'}`"></span></div>
+      <progress max="100" :value="progress" :aria-label="`已完成 ${progress}%`"></progress>
+      <p x-text="`${processed.toLocaleString()} / ${(state.snapshot.total || 0).toLocaleString()} 条 · ${progress}%`"></p>
+      <div class="reclassify-counts"><div>成功<strong x-text="state.succeeded || 0"></strong></div><div>失败<strong x-text="state.failed || 0"></strong></div><div>跳过<strong x-text="state.skipped || 0"></strong></div><div>正在处理 ID<strong x-text="task?.current_id || '—'"></strong></div></div>
+      <p x-show="reasonLabel" x-text="reasonLabel"></p><p class="reclassify-error" x-show="modelChanged">当前模型与任务模型不一致。请取消旧任务，再以新模型开始完整检测。</p>
+      <dl class="reclassify-details"><dt>本轮模型 SHA256</dt><dd x-text="state.model_sha256 || '尚未开始'"></dd><dt>当前模型 SHA256</dt><dd x-text="task?.current_model || '正在加载…'"></dd><dt>断点 / 最大记录 ID</dt><dd x-text="`${state.cursor || 0} / ${state.snapshot.max_id || 0}`"></dd><dt>开始时间</dt><dd x-text="dateLabel(state.started_at)"></dd><dt>进度更新时间</dt><dd x-text="dateLabel(state.updated_at)"></dd><dt>逐张处理间隔</dt><dd x-text="`${state.interval_ms ?? 0} ms`"></dd></dl>
+      <div class="review-actions"><button class="review-button" type="button" @click="control('pause')" :disabled="busy || state.status !== 'running'">暂停</button><button class="review-button review-primary" type="button" @click="control('resume')" :disabled="busy || !canResume">从断点继续</button><button class="review-button review-invalid" type="button" @click="control('cancel')" :disabled="busy || !canCancel">取消任务</button><button class="review-button" type="button" @click="refresh()" :disabled="busy">刷新</button></div>
+      <p>暂停或取消不会回滚已更新的预测。恢复后从断点的下一条继续，失败记录不会自动重试。</p>
+    </section>
+    <form class="reclassify-panel" @submit.prevent="start()" aria-label="开始全量重新分类">
+      <h2>开始新一轮</h2><p>默认不额外等待，仍逐张顺序处理。请观察前台延迟、CPU 和数据库负载，必要时增加间隔或暂停。</p>
+      <label class="review-field">每张完成后的等待时间（毫秒）<input type="number" min="0" max="60000" step="1" x-model="interval" :disabled="busy || !canStart" required></label>
+      <label class="reclassify-confirm"><input type="checkbox" x-model="confirmed" :disabled="busy || !canStart">我确认覆盖全部历史预测和置信度，人工标注保持不变。</label>
+      <button class="review-button review-primary" type="submit" :disabled="busy || !canStart || !confirmed">开始全量重新检测</button>
+      <p>源图片内容与历史 SHA256 不一致时跳过。原模型 SHA256 保留为记录身份；替换预测所用的模型版本记录在本轮任务进度中。</p>
+    </form>
+    <section class="reclassify-panel" aria-label="最近失败或跳过记录"><h2>最近异常记录（最多 50 条）</h2><p>下载或识别失败最多尝试两次，连续失败 20 条自动暂停。修复原因后，已越过断点的失败项需要在下一轮全量检测中重试。</p><p x-show="!state.failures?.length">暂无异常记录。</p><div class="reclassify-failures"><template x-for="failure in state.failures || []" :key="failure.id"><p><a :href="`/image-review/review?id=${failure.id}`" x-text="`#${failure.id}`"></a><span x-text="failureLabel(failure.code)"></span></p></template></div></section>
+  </div>
+</main>
+{{ end }}

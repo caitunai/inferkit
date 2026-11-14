@@ -4,7 +4,11 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/caitun/inferkit/services/imagereview"
+	"gorm.io/gorm/schema"
 )
 
 func TestImageQueryValidation(t *testing.T) {
@@ -25,6 +29,46 @@ func TestImageQueryValidation(t *testing.T) {
 		if err := query.Validate(); !errors.Is(err, ErrImageQuery) {
 			t.Fatalf("invalid query accepted: %+v, error=%v", query, err)
 		}
+	}
+}
+
+func TestMulticlassRecordUsesExistingFields(t *testing.T) {
+	t.Parallel()
+	store := &ImageStore{modelSHA256: strings.Repeat("b", 64)}
+	result := imageTestResult(t.Name(), 0.9)
+	result.Labels = imagereview.Labels()
+	result.Label, result.ClassID, result.LabelID, result.ClassName = "03_childish", 2, 3, "幼稚"
+	row, err := store.newRecord(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Label != result.Label || row.Confidence != float64(result.Confidence) || row.Correction != "" {
+		t.Fatalf("prediction or annotation ownership lost: %+v", row)
+	}
+}
+
+func TestImagePredictionDoesNotPersistClassMetadata(t *testing.T) {
+	t.Parallel()
+	table, err := schema.Parse(&ImagePrediction{}, new(sync.Map), schema.NamingStrategy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"class_id", "label_id", "class_name"} {
+		if _, exists := table.FieldsByDBName[column]; exists {
+			t.Fatal("derived metadata must not become a database column", column)
+		}
+	}
+}
+
+func TestAllNewAndLegacyAnnotationLabels(t *testing.T) {
+	t.Parallel()
+	for _, label := range imagereview.FilterLabels() {
+		if !validImageAnnotation(label, "reviewer") {
+			t.Fatal("supported annotation rejected", label)
+		}
+	}
+	if validImageAnnotation("02_missing", "reviewer") {
+		t.Fatal("nonexistent business label accepted")
 	}
 }
 

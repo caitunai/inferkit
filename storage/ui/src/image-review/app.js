@@ -18,11 +18,12 @@ export function createImageReviewApp(browser = window) {
     return payload.data;
   };
   return {
-    view: "list", filters: {}, activeFilters: {}, items: [], current: null, cursors: [null], reviewCursor: null,
+    view: "list", labels: [], filters: {}, activeFilters: {}, items: [], current: null, cursors: [null], reviewCursor: null,
     loading: false, saving: false, hasMore: false, error: "", toast: { message: "", type: "success" }, reviewedCount: 0, brokenImages: {},
     modalRecord: null, modalError: "", pageCursor: null,
     async init() {
       this.view = this.$el.dataset.view;
+      this.labels = (this.$el.dataset.labels || "").trim().split(/\s+/).filter(Boolean);
       this.filters = filtersFromURL(browser.location.search, this.view === "review");
       this.activeFilters = { ...this.filters };
       const id = new URLSearchParams(browser.location.search).get("id");
@@ -55,6 +56,24 @@ export function createImageReviewApp(browser = window) {
     get modalImage() { return this.modalRecord ? this.imageSource(this.modalRecord) : ""; },
     get selectionImage() { return this.view === "review" ? this.currentImage : this.modalImage; },
     percent, labelTitle, safeImageURL,
+    annotationSelected(record, label) {
+      const selected = record?.correction || record?.label;
+      const normalized = ({ "0_invalid": "00_invalid", "1_valid": "01_valid" })[selected] || selected;
+      return !!selected && normalized === label;
+    },
+    annotationClass(record, label) {
+      return { "review-selected": this.annotationSelected(record, label) };
+    },
+    labelShortcut(label) { const index = this.labels.indexOf(label); return index < 0 || index > 9 ? "" : String((index + 1) % 10); },
+    handleShortcut(event) {
+      if (disposed || this.view !== "review" || this.busy || !this.current || this.modalRecord) return;
+      if (event.defaultPrevented || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (event.target?.closest?.("input, select, textarea, button, a, [contenteditable]:not([contenteditable='false']), [role='textbox'], dialog")) return;
+      if (event.key === "Enter") { event.preventDefault(); return this.acceptModel(); }
+      if (!/^[0-9]$/.test(event.key) || !this.currentImage) return;
+      const label = this.labels[(Number(event.key) + 9) % 10];
+      if (label) { event.preventDefault(); return this.annotate(label); }
+    },
     imageSource(record) { return this.brokenImages[record.id] ? "" : safeImageURL(record.url); },
     dateLabel(value) { return new Date(value).toLocaleString("zh-CN"); },
     async applyFilters() {
@@ -143,16 +162,17 @@ export function createImageReviewApp(browser = window) {
     },
     acceptModel(record = this.current) {
       if (!record) return;
-      return this.view === "review" ? this.annotate(record.label) : this.annotateList(record, record.label);
+      const options = { adoptModel: true };
+      return this.view === "review" ? this.annotate(record.label, options) : this.annotateList(record, record.label, options);
     },
-    async annotate(label) {
-      if (!await this.saveAnnotation(this.current, label)) return;
+    async annotate(label, options) {
+      if (!await this.saveAnnotation(this.current, label, options)) return;
       this.reviewedCount++;
       await this.nextImage();
       if (this.error) this.reportError(`标注已保存，下一张图片加载失败：${this.error}`);
     },
-    async annotateList(record, label) {
-      if (!await this.saveAnnotation(record, label)) return;
+    async annotateList(record, label, options) {
+      if (!await this.saveAnnotation(record, label, options)) return;
       if (this.modalRecord?.id === record.id) this.closeAnnotation();
       if (this.activeFilters.review === "pending") this.items = this.items.filter((item) => item.url !== record.url);
     },
@@ -162,7 +182,7 @@ export function createImageReviewApp(browser = window) {
       }
       record.correction = label; record.revision += revisionDelta;
     },
-    async saveAnnotation(record, label) {
+    async saveAnnotation(record, label, options = {}) {
       if (this.busy || !record || disposed) return false;
       const errorField = this.modalRecord ? "modalError" : "error";
       this.saving = true; this[errorField] = ""; this.dismissToast();
@@ -174,7 +194,7 @@ export function createImageReviewApp(browser = window) {
         });
         if (disposed) return false;
         this.syncAnnotation(record, label);
-        this.notify(`已保存：${labelTitle(label)}`);
+        this.notify(`${options.adoptModel ? "已采用模型结果" : "已保存"}：${labelTitle(label)}`);
         return true;
       } catch (error) {
         if (!disposed && error.name !== "AbortError") this.reportError(error.message, errorField);

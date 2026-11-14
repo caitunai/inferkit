@@ -1,6 +1,6 @@
 import { createAutoSubmit } from "../shared/auto-submit.js";
 import { supportedImageFile } from "../shared/image.js";
-import { HISTORY_LIMIT, HISTORY_KEY, THUMBNAIL_LIMIT, imageURL, labelTitle, loadHistory, percent, readResult, saveHistory } from "./history.js";
+import { HISTORY_LIMIT, HISTORY_KEY, THUMBNAIL_LIMIT, imageURL, labelTitle, labelState, loadHistory, percent, readResult, saveHistory } from "./history.js";
 import { TOKEN_KEY, cleanToken, credentialExpired, loadCredential, saveCredential } from "./credential.js";
 import { DETECTION_ROUTES, detectionRoute } from "./routes.js";
 
@@ -62,6 +62,7 @@ export function createImageFilterApp(browser = window) {
     get selectedRoute() { return detectionRoute(this.backend); },
     get result() { return this.active?.result || null; },
     get successCount() { return this.history.filter((item) => item.result).length; },
+    get historyLabels() { return [...new Set(this.history.flatMap((item) => item.result?.labels || []))]; },
     get filteredHistory() {
       return this.history.filter((item) => this.historyFilter === "all"
         || (this.historyFilter === "error" ? !item.result : item.result?.label === this.historyFilter));
@@ -76,7 +77,7 @@ export function createImageFilterApp(browser = window) {
     get probabilities() {
       return this.result?.labels.map((label, index) => ({ label, value: this.result.probabilities[index], selected: index === this.result.class_id })) || [];
     },
-    percent, labelTitle,
+    percent, labelTitle, labelState,
     historyImage(entry) { return this.previewErrors[entry.id] ? "" : entry.thumbnail || (entry.result && entry.kind === "url" ? entry.sourceURL : ""); },
     timeLabel(value) { return new Date(value).toLocaleTimeString("zh-CN", { hour12: false }); },
     durationLabel(value) { return value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(2)} s`; },

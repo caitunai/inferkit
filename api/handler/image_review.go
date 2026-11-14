@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog/log"
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/db"
@@ -31,6 +30,7 @@ func ImageReviewPage(review bool) base.HandlerFunc {
 		data := pageData(c, imageReviewEntry, "识别结果与人工标注 · InferKit")
 		data["review"] = review
 		data["labels"] = imagereview.Labels()
+		data["filter_labels"] = imagereview.FilterLabels()
 		c.View("image-review.index", data)
 	}
 }
@@ -121,16 +121,9 @@ func imageReviewWriteAllowed(c *base.Context) bool {
 }
 
 func imageReviewError(c *base.Context, err error) {
-	status, message := http.StatusServiceUnavailable, "识别记录服务暂不可用"
-	switch {
-	case errors.Is(err, db.ErrImageQuery):
-		status, message = http.StatusBadRequest, "筛选条件或标注参数不合法"
-	case errors.Is(err, db.ErrImageNotFound):
-		status, message = http.StatusNotFound, "识别记录不存在"
-	case errors.Is(err, db.ErrImageConflict):
-		status, message = http.StatusConflict, "该记录已被其他人修改，请重新加载后再标注"
-	default:
-		log.Ctx(c.Request.Context()).Error().Err(err).Msg("image review operation failed")
-	}
-	c.AbortWithStatusJSON(status, gin.H{base.KeyStatus: status, base.KeyMessage: message, base.KeyData: gin.H{}})
+	reviewRequestError(c, err, "识别记录服务暂不可用", []reviewErrorRule{
+		{err: db.ErrImageQuery, status: http.StatusBadRequest, message: "筛选条件或标注参数不合法"},
+		{err: db.ErrImageNotFound, status: http.StatusNotFound, message: "识别记录不存在"},
+		{err: db.ErrImageConflict, status: http.StatusConflict, message: "该记录已被其他人修改，请重新加载后再标注"},
+	})
 }

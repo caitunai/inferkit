@@ -23,27 +23,33 @@ type Result struct {
 	URL              string    `json:"url,omitempty"`
 	SHA256           string    `json:"sha256"`
 	Label            string    `json:"label"`
+	ClassName        string    `json:"class_name,omitempty"`
+	LabelProfile     string    `json:"label_profile,omitempty"`
 	Labels           []string  `json:"labels"`
+	ClassMapping     []Class   `json:"class_mapping,omitempty"`
 	Probabilities    []float32 `json:"probabilities"`
 	ClassID          int       `json:"class_id"`
+	LabelID          int       `json:"label_id"`
 	Confidence       float32   `json:"confidence"`
 }
 
 // Service owns a single model session. Call Close after stopping HTTP ingress.
 type Service struct {
-	engine      *engine
-	http        *resty.Client
-	cache       *resultStore
-	requests    chan struct{}
-	closeErr    error
-	labels      []string
-	modelSHA256 string
-	config      Config
-	plan        executionPlan
-	mu          sync.Mutex
-	active      sync.WaitGroup
-	closeOnce   sync.Once
-	closed      bool
+	engine       *engine
+	http         *resty.Client
+	cache        *resultStore
+	requests     chan struct{}
+	closeErr     error
+	labels       []string
+	classes      []Class
+	labelProfile string
+	modelSHA256  string
+	config       Config
+	plan         executionPlan
+	mu           sync.Mutex
+	active       sync.WaitGroup
+	closeOnce    sync.Once
+	closed       bool
 }
 
 // New verifies the package and creates one reusable inference session.
@@ -80,6 +86,7 @@ func newWithPlanContext(ctx context.Context, c Config, plan executionPlan) (*Ser
 	}
 	service := &Service{
 		engine: e, http: newDownloader(c, plan), config: c, plan: plan, labels: slices.Clone(m.Labels), modelSHA256: m.SHA256,
+		classes: m.classes(), labelProfile: m.LabelProfile,
 		requests: make(chan struct{}, plan.requests), cache: newResultStore(c),
 	}
 	for _, backend := range []Backend{Libvips, Go} {
@@ -132,6 +139,22 @@ func (s *Service) Check(ctx context.Context, src Source) (Result, error) {
 	return s.WithBackend(Libvips).Check(ctx, src)
 }
 
+// ErrContentChanged prevents classifying a new URL body as a historical image.
+var ErrContentChanged = errors.New("historical image content changed")
+
+// Recheck uses the existing native session, bypasses both caches and coalescing,
+// and yields while foreground requests are admitted. The expected content hash
+// is checked before expensive preprocessing or inference.
+func (s *Service) Recheck(ctx context.Context, src Source, expectedSHA string) (Result, error) {
+	if decoded, err := hex.DecodeString(expectedSHA); err != nil || len(decoded) != sha256.Size {
+		return Result{}, ErrInput
+	}
+	if len(s.requests) > 0 {
+		return Result{}, ErrBusy
+	}
+	return (Detector{service: s, backend: Libvips, fresh: true, expectedSHA: expectedSHA}).Check(ctx, src)
+}
+
 // Check uses this adapter's backend and the service's shared admission budget.
 func (d Detector) Check(ctx context.Context, src Source) (result Result, returnErr error) {
 	if _, err := ParseBackend(string(d.backend)); err != nil {
@@ -171,12 +194,16 @@ func (d Detector) checkSource(ctx context.Context, src Source) (Result, error) {
 	hash := sha256.Sum256(data)
 	key := hex.EncodeToString(hash[:])
 	done(nil)
+	if d.expectedSHA != "" && key != d.expectedSHA {
+		return Result{}, ErrContentChanged
+	}
 	result, err := d.checkContent(ctx, key, data)
 	if err != nil {
 		return Result{}, err
 	}
 	result.URL = src.URL
 	result.Labels = slices.Clone(result.Labels)
+	result.ClassMapping = slices.Clone(result.ClassMapping)
 	result.Probabilities = slices.Clone(result.Probabilities)
 	return result, nil
 }
@@ -184,7 +211,7 @@ func (d Detector) checkSource(ctx context.Context, src Source) (Result, error) {
 func (d Detector) checkContent(ctx context.Context, key string, data []byte) (Result, error) {
 	s := d.service
 	trace := imagetiming.From(ctx)
-	if s.config.BypassCache {
+	if s.config.BypassCache || d.fresh {
 		trace.Cache("bypass")
 		return d.classify(ctx, key, data)
 	}
@@ -267,6 +294,7 @@ func (s *Service) result(probabilities []float32) (Result, error) {
 	}
 	return Result{
 		Label: s.labels[best], ClassID: best, Confidence: probabilities[best],
+		LabelID: s.classes[best].LabelID, ClassName: s.classes[best].Name, LabelProfile: s.labelProfile, ClassMapping: s.classes,
 		Labels: s.labels, Probabilities: slices.Clone(probabilities),
 	}, nil
 }

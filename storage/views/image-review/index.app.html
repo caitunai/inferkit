@@ -1,10 +1,10 @@
 {{ define "content" }}
-<main x-data="imageReviewApp()" data-view="{{ if .review }}review{{ else }}list{{ end }}" x-cloak>
-  <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-review">识别记录</a><a :href="reviewLink">逐张标注 →</a></nav></div></header>
+<main x-data="imageReviewApp()" data-view="{{ if .review }}review{{ else }}list{{ end }}" data-labels="{{ range .labels }}{{ . }} {{ end }}" @keydown.window="handleShortcut($event)" x-cloak>
+  <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-review">识别记录</a><a :href="reviewLink">逐张标注 →</a><a href="/image-review/reclassify">历史重新分类</a></nav></div></header>
   <div class="review-width">
     <div class="review-heading"><h1 x-text="view === 'review' ? '逐张纠错标注' : '图片识别记录'"></h1></div>
     <form class="review-filters" @submit.prevent="applyFilters()" aria-label="识别结果筛选">
-      <label class="review-field">预测类型<select x-model="filters.label" :disabled="busy"><option value="">全部类型</option>{{ range .labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>
+      <label class="review-field">预测类型<select x-model="filters.label" :disabled="busy"><option value="">全部类型</option>{{ range .filter_labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>
       <label class="review-field">最低置信度 (%)<input type="number" x-model="filters.min" min="0" max="100" step="0.01" required :disabled="busy"></label>
       <label class="review-field">最高置信度 (%)<input type="number" x-model="filters.max" min="0" max="100" step="0.01" required :disabled="busy"></label>
       <label class="review-field">标注状态<select x-model="filters.review" :disabled="busy"><option value="all">全部状态</option><option value="pending">未标注</option><option value="reviewed">已标注</option></select></label>
@@ -19,7 +19,10 @@
         <template x-for="record in items" :key="record.id">
           <article class="review-card">
             <button type="button" class="review-photo" @click="openAnnotation(record)" :disabled="busy || !imageSource(record)" aria-haspopup="dialog" :aria-label="`查看图片 ${record.id} 大图`"><img x-show="imageSource(record)" :src="imageSource(record) || undefined" @error="brokenImages[record.id] = true" loading="lazy" referrerpolicy="no-referrer" :alt="`识别图片 ${record.id}`"><span x-show="!imageSource(record)">图片暂不可用</span></button>
-            <div class="review-card-body"><div class="review-card-title"><span x-text="labelTitle(record.label)"></span><strong x-text="percent(record.confidence)"></strong></div><p><span class="review-badge" x-text="record.correction ? `人工：${labelTitle(record.correction)}` : '未标注'"></span></p><p x-text="dateLabel(record.created_at)"></p><a class="review-source" :href="safeImageURL(record.url) || undefined" target="_blank" rel="noopener noreferrer" :title="record.url" x-text="record.url"></a><div class="review-card-actions"><button type="button" class="review-button review-invalid" @click="annotateList(record, '0_invalid')" :disabled="busy">无效</button><button type="button" class="review-button review-valid" @click="annotateList(record, '1_valid')" :disabled="busy">有效</button><button type="button" class="review-button review-model" @click="acceptModel(record)" :disabled="busy">采用模型结果</button></div></div>
+            <div class="review-card-body"><div class="review-card-title"><span x-text="labelTitle(record.label)"></span><strong x-text="percent(record.confidence)"></strong></div><p><span class="review-badge" x-text="record.correction ? `人工：${labelTitle(record.correction)}` : '未标注'"></span></p><p x-text="dateLabel(record.created_at)"></p><a class="review-source" :href="safeImageURL(record.url) || undefined" target="_blank" rel="noopener noreferrer" :title="record.url" x-text="record.url"></a><div class="review-card-actions" role="group" :aria-label="`纠正图片 ${record.id} 的人工标签`" :aria-busy="saving">
+              <button type="button" class="review-button review-model review-adopt" @click="acceptModel(record)" :disabled="busy" :title="`将模型结果「${labelTitle(record.label)}」保存为人工标注`">采用模型结果</button>
+              {{ range .labels }}<button type="button" class="review-button review-card-choice" data-label="{{ . }}" :class="annotationClass(record, $el.dataset.label)" :aria-pressed="annotationSelected(record, $el.dataset.label)" @click="annotateList(record, $el.dataset.label)" :disabled="busy" :title="`纠正为「${labelTitle($el.dataset.label)}」，点击立即保存`" x-text="labelTitle($el.dataset.label)"></button>{{ end }}
+            </div></div>
           </article>
         </template>
       </div>
@@ -68,8 +71,9 @@
 {{ end }}
 
 {{ define "image-review.choices" }}
-<div class="review-labels" :aria-busy="saving">
-  {{ range .labels }}<button type="button" class="review-button review-choice" :class="$el.dataset.label === '0_invalid' ? 'review-invalid' : 'review-valid'" data-label="{{ . }}" @click="chooseLabel($el.dataset.label)" :disabled="busy || !selectionImage" x-text="labelTitle($el.dataset.label)"></button>{{ end }}
-  <button type="button" class="review-button review-choice review-model" @click="acceptModel(view === 'review' ? current : modalRecord)" :disabled="busy" :title="view === 'review' ? '采用模型结果并下一张' : '采用模型结果'" x-text="view === 'review' ? '跳过此图' : '采用模型'"></button>
+<div class="review-labels" :aria-busy="saving" role="group" aria-label="选择人工分类">
+  {{ range .labels }}<button type="button" class="review-button review-choice" :class="annotationClass(view === 'review' ? current : modalRecord, $el.dataset.label)" :aria-pressed="annotationSelected(view === 'review' ? current : modalRecord, $el.dataset.label)" data-label="{{ . }}" @click="chooseLabel($el.dataset.label)" :disabled="busy || !selectionImage"><span x-text="labelTitle($el.parentElement.dataset.label)"></span><kbd class="review-shortcut" x-show="view === 'review'" x-text="labelShortcut($el.parentElement.dataset.label)" aria-hidden="true"></kbd></button>{{ end }}
+  <button type="button" class="review-button review-choice review-model review-adopt" @click="acceptModel(view === 'review' ? current : modalRecord)" :disabled="busy" :title="view === 'review' ? '保存模型结果为人工标注，成功后进入下一张（Enter）' : '保存模型结果为人工标注'">采用模型结果<kbd class="review-shortcut" x-show="view === 'review'" aria-hidden="true">Enter</kbd></button>
 </div>
+<p class="review-choice-help" role="status" x-text="saving ? '正在保存人工标注…' : view === 'review' ? '点击分类立即保存并进入下一张。快捷键：1–9、0 选择分类，Enter 采用模型结果；编辑筛选条件时不触发。' : '点击分类立即保存；采用模型结果也会记录为已审核。'"></p>
 {{ end }}

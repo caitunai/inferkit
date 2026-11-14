@@ -71,3 +71,9 @@ dictionarySHA256=""
 
 [ui]
 assetMode="embedded"
+
+# Historical serial reclassification console uses the existing storage volume.
+# Requires image.review.enabled and a loaded image.filter model.
+[image.review.reclassify]
+enabled=true
+# directory="/var/lib/inferkit/image-reclassification"

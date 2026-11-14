@@ -67,7 +67,7 @@
         <div class="result-empty" x-show="busy"><span class="loading-ring"></span><h3>正在分析图片</h3><p>检测完成后，结果将自动加入本次历史。</p></div>
         <div class="result-content" x-show="active && !busy">
           <div class="result-overview"><div class="result-thumb"><img x-show="previewSource && !previewFailed" :src="previewSource || undefined" @error="previewFailed = true" alt="历史图片预览" referrerpolicy="no-referrer"><svg x-show="!previewSource || previewFailed" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" stroke="currentColor" stroke-width="1.4"/><path d="m4 17 5-5 4 4 3-4 5 5" stroke="currentColor" stroke-width="1.4"/></svg></div><div class="result-source"><span class="eyebrow" x-text="active ? sourceLabel(active.kind) : ''"></span><h3 class="truncate" x-text="active?.name" :title="active?.name"></h3><span class="small muted" x-text="active ? `总耗时 ${durationLabel(active.duration)}` : ''"></span><span class="result-backend" x-text="active ? routeName(active.backend) : ''"></span><code class="backend-path" x-text="active ? routePath(active.backend) : ''"></code></div></div>
-          <div class="classification" :class="result?.label === '1_valid' ? 'is-valid' : result ? 'is-invalid' : 'is-error'">
+          <div class="classification" :class="result ? `is-${labelState(result.label)}` : 'is-error'">
             <div><span class="classification-caption" x-text="result ? '分类判断' : '本次检测未完成'"></span><h3 x-text="result ? labelTitle(result.label) : '检测失败'"></h3><code x-show="result" x-text="result?.label"></code></div>
             <div class="confidence" x-show="result"><strong x-text="result ? percent(result.confidence) : ''"></strong><span>置信度</span></div>
             <p x-show="!result" x-text="active?.error"></p>
@@ -81,7 +81,7 @@
     <div class="feedback feedback-notice" role="status" x-show="notice"><p x-text="notice"></p><button type="button" @click="notice = ''" aria-label="关闭存储提示">×</button></div>
 
     <section class="surface history-panel" aria-labelledby="history-heading">
-      <div class="history-heading"><div><div class="history-title"><h2 id="history-heading">本次检测历史</h2><span class="count-badge" x-text="history.length">0</span></div><p>当前标签页内保留，刷新后可继续查看，最多 50 条。</p></div><div class="history-actions"><label class="sr-only" for="history-filter">筛选历史记录</label><select id="history-filter" x-model="historyFilter"><option value="all">全部记录</option><option value="1_valid">有效图片</option><option value="0_invalid">无效图片</option><option value="error">检测失败</option></select><button type="button" class="button button-ghost" @click="clearHistory()" :disabled="busy || !history.length">清空历史</button></div></div>
+      <div class="history-heading"><div><div class="history-title"><h2 id="history-heading">本次检测历史</h2><span class="count-badge" x-text="history.length">0</span></div><p>当前标签页内保留，刷新后可继续查看，最多 50 条。</p></div><div class="history-actions"><label class="sr-only" for="history-filter">筛选历史记录</label><select id="history-filter" x-model="historyFilter"><option value="all">全部记录</option><template x-for="label in historyLabels" :key="label"><option :value="label" x-text="labelTitle(label)"></option></template><option value="error">检测失败</option></select><button type="button" class="button button-ghost" @click="clearHistory()" :disabled="busy || !history.length">清空历史</button></div></div>
       <div class="history-grid grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" x-show="filteredHistory.length" role="list" aria-label="检测历史图片列表">
         <template x-for="entry in filteredHistory" :key="entry.id">
           <div role="listitem" class="min-w-0">
@@ -90,7 +90,7 @@
                 <img x-show="historyImage(entry)" :src="historyImage(entry) || undefined" :alt="entry.name" loading="lazy" referrerpolicy="no-referrer" @error="previewErrors[entry.id] = true">
                 <span class="history-no-image" x-show="!historyImage(entry)"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="5" y="5" width="22" height="22" rx="5" stroke="currentColor" stroke-width="1.5"/><path d="m6 23 7-7 5 5 4-5 5 6" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg><span x-text="entry.result ? '暂无图片预览' : '检测未完成'"></span></span>
                 <span class="history-selected" x-show="activeID === entry.id" aria-hidden="true">✓</span>
-                <span class="result-badge" :class="entry.result?.label === '1_valid' ? 'valid' : entry.result ? 'invalid' : 'failed'" x-text="entry.result ? labelTitle(entry.result.label) : '检测失败'"></span>
+                <span class="result-badge" :class="entry.result ? labelState(entry.result.label) : 'failed'" x-text="entry.result ? labelTitle(entry.result.label) : '检测失败'"></span>
               </span>
               <span class="history-card-body">
                 <strong class="history-name truncate" x-text="entry.name" :title="entry.name"></strong>

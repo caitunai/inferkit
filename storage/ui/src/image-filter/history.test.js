@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { HISTORY_KEY, HISTORY_LIMIT, imageURL, loadHistory, saveHistory, readResult } from "./history.js";
+import { HISTORY_KEY, HISTORY_LIMIT, imageURL, loadHistory, saveHistory, readResult, labelTitle, labelState } from "./history.js";
 
 function storage() {
   const data = new Map();
@@ -39,6 +39,26 @@ test("URL validation excludes unsafe schemes and credential-bearing URLs", () =>
 test("malformed prediction payloads never become successful history records", () => {
   assert.deepEqual(readResult(result), result);
   for (const invalid of [{ ...result, class_id: 0 }, { ...result, probabilities: [NaN, 1] }, { ...result, probabilities: [0.8, 0.8] }]) assert.throws(() => readResult(invalid));
+});
+
+test("ten-class results retain noncontiguous business IDs through history storage", () => {
+  const labels = ["00_invalid", "01_valid", "03_childish", "04_paper", "05_other_app", "06_professional", "07_stolen", "08_screenshot", "09_sensitive", "10_photo"];
+  const mapping = labels.map((label, index) => ({ index, class: label, label_id: index < 2 ? index : index + 1, name: labelTitle(label) }));
+  const session = storage();
+  for (let index = 0; index < labels.length; index++) {
+    const value = { ...result, label: labels[index], labels, class_id: index, label_id: mapping[index].label_id,
+      class_name: mapping[index].name, class_mapping: mapping, label_profile: "artwork_10class_v1",
+      probabilities: labels.map((_, i) => i === index ? 1 : 0), confidence: 1 };
+    assert.deepEqual(readResult(value), value);
+    assert.equal(saveHistory(session, [{ ...entry(), result: value }]), true);
+    assert.deepEqual(loadHistory(session)[0].result, value);
+    assert.throws(() => readResult({ ...value, class_id: 10 }));
+    assert.throws(() => readResult({ ...value, label_id: 99 }));
+    assert.throws(() => readResult({ ...value, probabilities: value.probabilities.slice(1) }));
+  }
+  assert.equal(labelState("01_valid"), "valid");
+  assert.equal(labelState("00_invalid"), "invalid");
+  assert.equal(labelState("10_photo"), "category");
 });
 
 test("backend history preserves explicit routes and upgrades old entries", () => {

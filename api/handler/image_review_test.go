@@ -12,7 +12,10 @@ import (
 
 	"github.com/caitun/inferkit/api/base"
 	"github.com/caitun/inferkit/db"
+	"github.com/caitun/inferkit/services/imagereview"
 )
+
+const imageReviewTestUsername = "review-admin"
 
 const imageReviewTestPassword = "test-only-review-password"
 
@@ -33,7 +36,7 @@ func (*imageReviewStub) Get(context.Context, uint) (*db.ImagePrediction, error) 
 }
 
 func (s *imageReviewStub) Annotate(_ context.Context, _ uint, _ uint64, _, reviewer string) error {
-	if reviewer != "review-admin" {
+	if reviewer != imageReviewTestUsername {
 		return db.ErrImageQuery
 	}
 	s.writes++
@@ -43,7 +46,7 @@ func (s *imageReviewStub) Annotate(_ context.Context, _ uint, _ uint64, _, revie
 func serveImageReview(request *http.Request, store ImageReviewRepository) *httptest.ResponseRecorder {
 	engine := gin.New()
 	router := base.NewRouter(engine).Group("/image-review/api")
-	router.RouterGroup.Use(gin.BasicAuth(gin.Accounts{"review-admin": imageReviewTestPassword}))
+	router.RouterGroup.Use(gin.BasicAuth(gin.Accounts{imageReviewTestUsername: imageReviewTestPassword}))
 	ImageReviewControl(router, store)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
@@ -53,7 +56,7 @@ func serveImageReview(request *http.Request, store ImageReviewRepository) *httpt
 func reviewAnnotationRequest(t *testing.T) *http.Request {
 	t.Helper()
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/image-review/api/results/1/annotation", strings.NewReader(`{"label":"0_invalid","revision":0}`))
-	request.SetBasicAuth("review-admin", imageReviewTestPassword)
+	request.SetBasicAuth(imageReviewTestUsername, imageReviewTestPassword)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Requested-With", "XMLHttpRequest")
 	return request
@@ -93,7 +96,7 @@ func TestImageReviewAnnotationValidationAndConflict(t *testing.T) {
 func TestImageReviewRejectsBadFilters(t *testing.T) {
 	t.Parallel()
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/image-review/api/results?min_confidence=0.95&max_confidence=0.8", nil)
-	request.SetBasicAuth("review-admin", imageReviewTestPassword)
+	request.SetBasicAuth(imageReviewTestUsername, imageReviewTestPassword)
 	response := serveImageReview(request, &imageReviewStub{})
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("bad probability bounds accepted: %d", response.Code)
@@ -120,12 +123,33 @@ func TestImageReviewPagesRenderEmbeddedTemplates(t *testing.T) {
 
 func assertReviewLabelsRendered(t *testing.T, body string) {
 	t.Helper()
-	for _, label := range []string{"0_invalid", "1_valid"} {
+	assertReviewCardLabelsRendered(t, body)
+	for _, label := range imagereview.Labels() {
 		if !strings.Contains(body, `data-label="`+label+`"`) {
 			t.Fatalf("annotation button missing for %s", label)
 		}
 	}
 	if strings.Contains(body, "current.prediction") {
 		t.Fatal("review page must not depend on removed prediction JSON")
+	}
+	if strings.Contains(body, "跳过此图") {
+		t.Fatal("adopting a model prediction must not be described as skipping")
+	}
+}
+
+func assertReviewCardLabelsRendered(t *testing.T, body string) {
+	t.Helper()
+	_, actions, found := strings.Cut(body, `class="review-card-actions"`)
+	if !found {
+		t.Fatal("gallery annotation controls missing")
+	}
+	actions, _, _ = strings.Cut(actions, "</div>")
+	for _, label := range imagereview.Labels() {
+		if !strings.Contains(actions, `data-label="`+label+`"`) {
+			t.Fatalf("gallery must directly expose classification %s", label)
+		}
+	}
+	if !strings.Contains(actions, "采用模型结果") {
+		t.Fatal("gallery must expose explicit model adoption")
 	}
 }
