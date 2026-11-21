@@ -1,4 +1,4 @@
-import { cursorOf, filtersFromURL, queryParams, reviewHref, safeImageURL } from "./query.js";
+import { cursorOf, filtersFromURL, maxReviewJumpPage, maxReviewOffset, offsetForPage, queryParams, reviewHref, reviewPageSize, safeImageURL } from "./query.js";
 import { labelTitle, percent } from "../image-filter/history.js";
 
 const successToastDuration = 3000;
@@ -21,6 +21,7 @@ export function createImageReviewApp(browser = window) {
     view: "list", labels: [], filters: {}, activeFilters: {}, items: [], current: null, cursors: [null], reviewCursor: null,
     loading: false, saving: false, hasMore: false, error: "", toast: { message: "", type: "success" }, reviewedCount: 0, brokenImages: {},
     modalRecord: null, modalError: "", pageCursor: null,
+    pageBase: 1, jumpPage: "1", maxJumpPage: maxReviewJumpPage, maxOffset: maxReviewOffset,
     async init() {
       this.view = this.$el.dataset.view;
       this.labels = (this.$el.dataset.labels || "").trim().split(/\s+/).filter(Boolean);
@@ -51,7 +52,7 @@ export function createImageReviewApp(browser = window) {
     },
     get busy() { return this.loading || this.saving; },
     get reviewLink() { return reviewHref(this.activeFilters); },
-    get pageNumber() { return this.cursors.length; },
+    get pageNumber() { return this.pageBase + this.cursors.length - 1; },
     get currentImage() { return this.current && !this.brokenImages[this.current.id] ? safeImageURL(this.current.url) : ""; },
     get modalImage() { return this.modalRecord ? this.imageSource(this.modalRecord) : ""; },
     get selectionImage() { return this.view === "review" ? this.currentImage : this.modalImage; },
@@ -76,10 +77,13 @@ export function createImageReviewApp(browser = window) {
     },
     imageSource(record) { return this.brokenImages[record.id] ? "" : safeImageURL(record.url); },
     dateLabel(value) { return new Date(value).toLocaleString("zh-CN"); },
+    correctionChanged() { if (this.filters.correction) this.filters.review = "reviewed"; },
+    reviewStateChanged() { if (this.filters.review === "pending") this.filters.correction = ""; },
     async applyFilters() {
       if (this.saving || this.modalRecord || disposed) return;
       try { queryParams(this.filters); } catch (error) { this.reportError(error.message); return; }
       this.activeFilters = { ...this.filters }; this.cursors = [null]; this.reviewCursor = null;
+      this.pageBase = 1; this.jumpPage = "1";
       this.reviewedCount = 0; this.dismissToast();
       return this.loadPage(null);
     },
@@ -92,7 +96,8 @@ export function createImageReviewApp(browser = window) {
       if (this.view === "review") this.current = null;
       else this.items = [];
       try {
-        const params = queryParams(this.activeFilters, cursor, this.view === "review" ? 1 : 24);
+        const offset = this.view === "list" && !cursor ? offsetForPage(this.pageBase) : 0;
+        const params = queryParams(this.activeFilters, cursor, this.view === "review" ? 1 : reviewPageSize, offset);
         const data = await request(`/results?${params}`, { signal: activeController.signal });
         if (disposed || controller !== activeController) return;
         this.brokenImages = {};
@@ -100,6 +105,7 @@ export function createImageReviewApp(browser = window) {
         else this.items = data.page.items;
         this.pageCursor = cursorOf(data.page.items.at(-1));
         this.hasMore = data.page.has_more;
+        this.jumpPage = String(Math.min(this.pageNumber, this.maxJumpPage));
       } catch (error) {
         if (!disposed && controller === activeController && error.name !== "AbortError") this.reportError(error.message);
       } finally {
@@ -112,8 +118,17 @@ export function createImageReviewApp(browser = window) {
       return this.loadPage(this.cursors.at(-1));
     },
     async previousPage() {
-      if (this.busy || this.cursors.length <= 1) return;
+      if (this.busy || this.pageNumber <= 1) return;
+      if (this.cursors.length === 1) return this.jumpToPage(this.pageBase - 1);
       this.cursors.pop(); return this.loadPage(this.cursors.at(-1));
+    },
+    async jumpToPage(value = this.jumpPage) {
+      if (this.busy || this.modalRecord || disposed || this.view !== "list") return;
+      let offset;
+      try { offset = offsetForPage(value); } catch (error) { this.reportError(error.message); return; }
+      this.pageBase = offset / reviewPageSize + 1;
+      this.cursors = [null];
+      return this.loadPage(null);
     },
     async nextImage() {
       if (this.busy || !this.current) return;
@@ -174,7 +189,8 @@ export function createImageReviewApp(browser = window) {
     async annotateList(record, label, options) {
       if (!await this.saveAnnotation(record, label, options)) return;
       if (this.modalRecord?.id === record.id) this.closeAnnotation();
-      if (this.activeFilters.review === "pending") this.items = this.items.filter((item) => item.url !== record.url);
+      const leavesFilter = this.activeFilters.correction && this.activeFilters.correction !== label;
+      if (this.activeFilters.review === "pending" || leavesFilter) this.items = this.items.filter((item) => item.url !== record.url);
     },
     syncAnnotation(record, label, revisionDelta = 1) {
       for (const item of this.items) {

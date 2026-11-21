@@ -5,16 +5,17 @@
     <div class="review-heading"><h1 x-text="view === 'review' ? '逐张纠错标注' : '图片识别记录'"></h1></div>
     <form class="review-filters" @submit.prevent="applyFilters()" aria-label="识别结果筛选">
       <label class="review-field">预测类型<select x-model="filters.label" :disabled="busy"><option value="">全部类型</option>{{ range .filter_labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>
+      <label class="review-field">人工标注类型<select x-model="filters.correction" @change="correctionChanged()" :disabled="busy"><option value="">全部类型</option>{{ range .filter_labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>
       <label class="review-field">最低置信度 (%)<input type="number" x-model="filters.min" min="0" max="100" step="0.01" required :disabled="busy"></label>
       <label class="review-field">最高置信度 (%)<input type="number" x-model="filters.max" min="0" max="100" step="0.01" required :disabled="busy"></label>
-      <label class="review-field">标注状态<select x-model="filters.review" :disabled="busy"><option value="all">全部状态</option><option value="pending">未标注</option><option value="reviewed">已标注</option></select></label>
+      <label class="review-field">标注状态<select x-model="filters.review" @change="reviewStateChanged()" :disabled="busy"><option value="all">全部状态</option><option value="pending">未标注</option><option value="reviewed">已标注</option></select></label>
       <label class="review-field">排序<select x-model="filters.sort" :disabled="busy"><option value="newest">最新识别优先</option><option value="oldest">最早识别优先</option><option value="confidence_asc">置信度从低到高</option><option value="confidence_desc">置信度从高到低</option></select></label>
       <button class="review-button review-primary" type="submit" :disabled="busy" x-text="view === 'review' ? '开始本轮标注' : '应用筛选'"></button>
     </form>
     <div class="review-empty" x-show="loading" role="status">正在加载识别记录…</div>
 
     <section x-show="view === 'list' && !loading" aria-label="识别图片列表">
-      <div class="review-empty" x-show="!items.length && !error"><h2>没有符合条件的记录</h2><p>调整筛选条件，或通过 API 提交带 URL 的图片后再查看。</p></div>
+      <div class="review-empty" x-show="!items.length && !error"><h2 x-text="pageNumber > 1 ? '本页暂无记录' : '没有符合条件的记录'"></h2><p x-text="pageNumber > 1 ? '尝试上一页或其他页码，也可调整筛选条件。' : '调整筛选条件，或通过 API 提交带 URL 的图片后再查看。'"></p></div>
       <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
         <template x-for="record in items" :key="record.id">
           <article class="review-card">
@@ -26,7 +27,12 @@
           </article>
         </template>
       </div>
-      <div class="review-pagination"><span x-text="`第 ${pageNumber} 页 · 本页 ${items.length} 张`"></span><div class="review-actions"><button type="button" class="review-button" @click="previousPage()" :disabled="busy || pageNumber <= 1">上一页</button><button type="button" class="review-button" @click="nextPage()" :disabled="busy || !hasMore">下一页</button></div></div>
+      <div class="review-pagination">
+        <span x-text="`第 ${pageNumber} 页 · 本页 ${items.length} 张`"></span>
+        <div class="review-actions"><button type="button" class="review-button" @click="previousPage()" :disabled="busy || pageNumber <= 1">上一页</button><button type="button" class="review-button" @click="nextPage()" :disabled="busy || !hasMore">下一页</button></div>
+        <form class="review-page-jump" @submit.prevent="jumpToPage()" aria-label="指定页码翻页"><label>跳至<input type="number" x-model="jumpPage" min="1" :max="maxJumpPage" step="1" :disabled="busy" required aria-label="目标页码" aria-describedby="review-page-limit">页</label><button class="review-button" type="submit" :disabled="busy">跳转</button></form>
+        <p id="review-page-limit" class="review-page-limit" x-text="`可直接跳至第 1–${maxJumpPage} 页（offset ≤ ${maxOffset}）；更深记录请使用下一页。`"></p>
+      </div>
     </section>
 
     <section x-show="view === 'review' && !loading" aria-label="单图纠错标注" :aria-busy="saving">

@@ -121,3 +121,27 @@ func TestImageAnnotationRejectsUnknownLabelWithoutDatabase(t *testing.T) {
 		t.Fatalf("unsupported annotation accepted: %v", err)
 	}
 }
+
+func TestImageOffsetValidationBeforeDatabaseAccess(t *testing.T) {
+	t.Parallel()
+	for _, offset := range []int{-1, MaxImageOffset + 1, math.MaxInt} {
+		query := DefaultImageQuery()
+		query.Offset = offset
+		if _, err := new(ImageStore).List(t.Context(), query); !errors.Is(err, ErrImageQuery) {
+			t.Fatalf("unsafe offset accepted: %d %v", offset, err)
+		}
+	}
+	query := DefaultImageQuery()
+	query.Offset = MaxImageOffset
+	if err := query.Validate(); err != nil {
+		t.Fatal("maximum offset must be inclusive", err)
+	}
+	query.AfterID = 1
+	if _, err := new(ImageStore).List(t.Context(), query); !errors.Is(err, ErrImageQuery) {
+		t.Fatal("offset and cursor cannot be combined", err)
+	}
+	query.Offset = 0
+	if err := query.Validate(); err != nil {
+		t.Fatal("keyset browsing must stay available", err)
+	}
+}

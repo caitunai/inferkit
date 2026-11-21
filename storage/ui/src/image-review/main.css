@@ -24,7 +24,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .review-field input { width: 108px; }
 .review-button { min-height: 38px; border: 1px solid #dce2de; border-radius: 7px; background: #fff; padding: 9px 16px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .review-primary { background: #314c3d; color: white; border-color: #314c3d; }
-.review-toast-region { position: fixed; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); z-index: 60; width: min(400px, calc(100vw - 40px)); pointer-events: none; }
+.review-toast-region { position: fixed; right: max(20px, env(safe-area-inset-right)); top: max(20px, env(safe-area-inset-top)); z-index: 60; width: min(400px, calc(100vw - 40px)); pointer-events: none; }
 .review-toast { display: flex; align-items: start; gap: 12px; padding: 14px 16px; border: 1px solid; border-radius: 12px; font-size: 13px; box-shadow: 0 8px 32px #172c3526; pointer-events: auto; }
 .review-toast-success { color: #426651; background: #ebf4ee; border-color: #bfdac9; }
 .review-toast-error { color: #9d4545; background: #fff0f0; border-color: #efd4d4; }
@@ -98,3 +98,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .review-choice span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 .review-choice .review-shortcut { flex: none; }
 .review-choice-help { min-height: 2.8em; margin: -6px 0 16px; font-size: 12px; line-height: 1.6; color: #65726a; }
+
+.review-page-jump { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.review-page-jump label { display: inline-flex; align-items: center; gap: 8px; }
+.review-page-jump input { width: 84px; height: 38px; border: 1px solid #dce2de; border-radius: 7px; padding: 0 8px; background: #fff; color: #26372f; }
+.review-page-limit { flex-basis: 100%; font-size: 12px; color: #7a837e; }

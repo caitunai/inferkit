@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createImageReviewApp } from "./app.js";
-import { filtersFromURL, queryParams, safeImageURL } from "./query.js";
+import { filtersFromURL, maxReviewJumpPage, maxReviewOffset, offsetForPage, queryParams, reviewPageSize, safeImageURL } from "./query.js";
 
 const labels = ["00_invalid", "01_valid", "03_childish", "04_paper", "05_other_app", "06_professional", "07_stolen", "08_screenshot", "09_sensitive", "10_photo"];
 const record = (id = 1) => ({ id, url: `https://example.com/${id}.png`, confidence: 0.8, revision: 0, label: "1_valid" });
@@ -449,4 +449,129 @@ test("failed correction keeps the model highlighted until a human annotation is 
   assert.equal(app.annotationSelected(first, "08_screenshot"), false);
   assert.equal(first.label, "08_screenshot");
   app.destroy();
+});
+
+const pageParams = (request) => new URL(request.url, "https://example.com").searchParams;
+
+test("page jump offsets include the 20000 boundary and reject overflow or mixed cursors", () => {
+  const filters = filtersFromURL("", false);
+  assert.equal(reviewPageSize, 24);
+  assert.equal(offsetForPage(1), 0);
+  assert.equal(maxReviewJumpPage, 834);
+  assert.equal(offsetForPage(834), 19992);
+  assert.equal(queryParams(filters, null, reviewPageSize, maxReviewOffset).get("offset"), "20000");
+  for (const value of [0, -1, 1.5, "1e2", 835, "999999999999999999999999"]) assert.throws(() => offsetForPage(value));
+  for (const value of [-1, maxReviewOffset + 1, 1.5, Infinity]) assert.throws(() => queryParams(filters, null, reviewPageSize, value));
+  assert.throws(() => queryParams(filters, { id: 1, confidence: .8 }, reviewPageSize, 24));
+});
+
+test("jumping preserves filters and resumes cursor browsing before returning to the offset origin", async () => {
+  const jumpItems = [record(101), record(102)];
+  const { app, browser, requests } = setup("list", [page([record()], true), page(jumpItems, true), page([record(103)], true), page(jumpItems, true), page([record(99)])]);
+  browser.location.search = "?label=08_screenshot&min=60&max=90&sort=confidence_asc&review=pending";
+  await app.init(); app.jumpPage = "5"; await app.jumpToPage();
+  assert.equal(app.pageNumber, 5); assert.equal(app.items[0].id, 101);
+  const jumped = pageParams(requests[1]);
+  assert.equal(jumped.get("offset"), "96"); assert.equal(jumped.has("after_id"), false);
+  for (const [key, value] of [["label", "08_screenshot"], ["min_confidence", "0.6"], ["max_confidence", "0.9"], ["sort", "confidence_asc"], ["review", "pending"]]) assert.equal(jumped.get(key), value);
+  await app.nextPage(); assert.equal(app.pageNumber, 6);
+  assert.equal(pageParams(requests[2]).get("after_id"), "102"); assert.equal(pageParams(requests[2]).has("offset"), false);
+  await app.previousPage(); assert.equal(app.pageNumber, 5); assert.equal(pageParams(requests[3]).get("offset"), "96");
+  await app.previousPage(); assert.equal(app.pageNumber, 4); assert.equal(pageParams(requests[4]).get("offset"), "72");
+  app.destroy();
+});
+
+test("cursor next-page remains available beyond the direct jump limit", async () => {
+  const { app, requests } = setup("list", [page([record()], true), page([record(20000)], true), page([record(20001)], true), page([record(20000)], true)]);
+  await app.init(); await app.jumpToPage(834);
+  assert.equal(pageParams(requests[1]).get("offset"), "19992");
+  await app.nextPage(); assert.equal(app.pageNumber, 835);
+  assert.equal(app.jumpPage, "834"); assert.equal(pageParams(requests[2]).has("offset"), false);
+  assert.equal(pageParams(requests[2]).get("after_id"), "20000");
+  await app.previousPage(); assert.equal(app.pageNumber, 834); assert.equal(pageParams(requests[3]).get("offset"), "19992");
+  app.destroy();
+});
+
+test("invalid page numbers do not clear the visible list or issue requests", async () => {
+  const { app, requests } = setup("list", [page([record()], true)]); await app.init();
+  for (const value of [0, -1, 1.5, "1e2", 835, "999999999999999999999"]) await app.jumpToPage(value);
+  assert.equal(requests.length, 1); assert.equal(app.pageNumber, 1); assert.equal(app.items[0].id, 1);
+  assert.match(app.toast.message, /offset/); app.destroy();
+});
+
+test("applying new filters resets page jumps and keyset history", async () => {
+  const { app, requests } = setup("list", [page([record()], true), page([record(99)], true), page([])]);
+  await app.init(); await app.jumpToPage(5); app.filters.label = "10_photo"; await app.applyFilters();
+  assert.equal(app.pageNumber, 1); assert.equal(app.jumpPage, "1");
+  assert.equal(pageParams(requests[2]).has("offset"), false); assert.equal(pageParams(requests[2]).has("after_id"), false);
+  assert.equal(pageParams(requests[2]).get("label"), "10_photo"); app.destroy();
+});
+
+test("retrying a failed jump keeps the original offset", async () => {
+  const { app, requests } = setup("list", [page([record()], true), { status: 503, message: "读取失败" }, page([record(100)], true)]);
+  await app.init(); await app.jumpToPage(5); assert.equal(app.items.length, 0); assert.match(app.error, /读取失败/);
+  await app.retryToast(); assert.equal(app.pageNumber, 5); assert.equal(app.items[0].id, 100);
+  assert.equal(pageParams(requests[2]).get("offset"), "96"); app.destroy();
+});
+
+test("annotating a jumped page preserves its original next-page cursor", async () => {
+  const { app, browser, requests } = setup("list", [page([record()], true), page([record(99), record(100)], true), { status: 0, data: { saved: true } }, page([record(101)])]);
+  browser.location.search = "?review=pending";
+  await app.init(); await app.jumpToPage(3); await app.annotateList(app.items[1], "10_photo"); await app.nextPage();
+  assert.equal(app.pageNumber, 4); assert.equal(app.items[0].id, 101);
+  assert.equal(pageParams(requests[3]).get("after_id"), "100"); assert.equal(pageParams(requests[3]).has("offset"), false);
+  app.destroy();
+});
+
+test("human annotation filters survive URLs, list queries and single-image review links", async () => {
+  const { app, browser, requests } = setup("list", [page([record()], true), page([record(2)], true)]);
+  browser.location.search = "?label=00_invalid&correction=10_photo&min=60&max=90&sort=confidence_asc";
+  await app.init();
+  assert.equal(app.filters.correction, "10_photo"); assert.equal(app.filters.review, "reviewed");
+  assert.equal(pageParams(requests[0]).get("label"), "00_invalid");
+  assert.equal(pageParams(requests[0]).get("correction"), "10_photo");
+  const link = new URL(app.reviewLink, "https://example.com");
+  assert.equal(link.searchParams.get("correction"), "10_photo"); assert.equal(link.searchParams.get("review"), "reviewed");
+  await app.nextPage(); assert.equal(pageParams(requests[1]).get("correction"), "10_photo"); app.destroy();
+  const review = filtersFromURL("?correction=08_screenshot", true);
+  assert.equal(review.review, "reviewed"); assert.equal(queryParams(review).get("correction"), "08_screenshot");
+});
+
+test("correction selection implies reviewed records and pending clears the correction draft", async () => {
+  const { app, requests } = setup("list", [page([record()]), page([])]); await app.init();
+  app.filters.correction = "03_childish"; app.correctionChanged();
+  assert.equal(app.filters.review, "reviewed");
+  assert.equal(pageParams(requests[0]).has("correction"), false);
+  app.filters.review = "pending"; app.reviewStateChanged();
+  assert.equal(app.filters.correction, "");
+  await app.applyFilters(); assert.equal(pageParams(requests[1]).has("correction"), false); app.destroy();
+});
+
+test("human classification is preserved by direct page jumps and cleared without stale cursors", async () => {
+  const { app, browser, requests } = setup("list", [page([record()], true), page([record(101)], true), page([])]);
+  browser.location.search = "?correction=04_paper";
+  await app.init(); await app.jumpToPage(5);
+  assert.equal(pageParams(requests[1]).get("offset"), "96"); assert.equal(pageParams(requests[1]).get("correction"), "04_paper");
+  app.filters.correction = ""; await app.applyFilters();
+  assert.equal(app.pageNumber, 1); assert.equal(pageParams(requests[2]).has("correction"), false);
+  assert.equal(pageParams(requests[2]).has("offset"), false); assert.equal(pageParams(requests[2]).has("after_id"), false); app.destroy();
+});
+
+test("corrections that leave the selected human category remove all same-URL cards after saving", async () => {
+  const first = { ...record(1), correction: "10_photo" };
+  const sibling = { ...record(2), url: first.url, correction: "10_photo" };
+  const other = { ...record(3), correction: "10_photo" };
+  const { app, browser } = setup("list", [page([first, sibling, other]), { status: 0, data: { saved: true } }]);
+  browser.location.search = "?correction=10_photo";
+  await app.init(); await app.annotateList(first, "08_screenshot");
+  assert.deepEqual(app.items.map(({ id }) => id), [3]); assert.equal(sibling.correction, "08_screenshot"); app.destroy();
+});
+
+test("matching corrections stay visible and failed corrections keep the filtered cards", async () => {
+  const first = { ...record(), correction: "10_photo" };
+  const { app, browser } = setup("list", [page([first]), { status: 0, data: { saved: true } }, { status: 409, message: "冲突" }]);
+  browser.location.search = "?correction=10_photo";
+  await app.init(); await app.annotateList(first, "10_photo"); assert.equal(app.items.length, 1);
+  await app.annotateList(first, "08_screenshot");
+  assert.equal(app.items.length, 1); assert.equal(first.correction, "10_photo"); app.destroy();
 });

@@ -51,8 +51,8 @@ const reviewLabelsRule = reviewCSS.match(/\.review-labels\{([^}]+)\}/)?.[1];
 if (!reviewLabelsRule?.includes("grid-template-columns:repeat(3,")) throw new Error("Single-image and modal classification controls must use three columns");
 console.log("Verified image review gallery and single-image annotation styles.");
 const toastRule = reviewCSS.match(/\.review-toast-region\{([^}]+)\}/)?.[1];
-if (!toastRule?.includes("position:fixed")) throw new Error("Image review toast must stay outside the page layout");
-console.log("Verified image review toast uses fixed positioning.");
+if (!toastRule?.includes("position:fixed") || !toastRule.includes("top:") || !toastRule.includes("right:") || toastRule.includes("bottom:")) throw new Error("Image review toast must stay fixed in the top-right corner");
+console.log("Verified image review toast uses fixed top-right positioning.");
 
 const ocrEntry = manifest["src/ocr/main.js"];
 if (!ocrEntry?.css?.length) throw new Error("OCR entry is missing its stylesheet");
