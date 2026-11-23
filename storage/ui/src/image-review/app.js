@@ -2,9 +2,11 @@ import { cursorOf, filtersFromURL, maxReviewJumpPage, maxReviewOffset, offsetFor
 import { labelTitle, percent } from "../image-filter/history.js";
 
 const successToastDuration = 3000;
+const statisticsRefreshDelay = 350;
 
 export function createImageReviewApp(browser = window) {
   let controller = null, disposed = false, toastTimer = null;
+  let statisticsController = null, statisticsTimer = null, statisticsVersion = 0;
   const request = async (path, options = {}) => {
     const response = await browser.fetch(`/image-review/api${path}`, {
       credentials: "same-origin", ...options,
@@ -22,6 +24,7 @@ export function createImageReviewApp(browser = window) {
     loading: false, saving: false, hasMore: false, error: "", toast: { message: "", type: "success" }, reviewedCount: 0, brokenImages: {},
     modalRecord: null, modalError: "", pageCursor: null,
     pageBase: 1, jumpPage: "1", maxJumpPage: maxReviewJumpPage, maxOffset: maxReviewOffset,
+    statistics: null, statisticsLoading: false, statisticsError: "", statisticsStale: false,
     async init() {
       this.view = this.$el.dataset.view;
       this.labels = (this.$el.dataset.labels || "").trim().split(/\s+/).filter(Boolean);
@@ -29,9 +32,43 @@ export function createImageReviewApp(browser = window) {
       this.activeFilters = { ...this.filters };
       const id = new URLSearchParams(browser.location.search).get("id");
       if (this.view === "review" && id && /^[1-9]\d*$/.test(id)) return this.reloadCurrent(id);
-      return this.applyFilters();
+      return this.view === "list" ? Promise.all([this.applyFilters(), this.loadStatistics()]) : this.applyFilters();
     },
-    destroy() { disposed = true; controller?.abort(); this.dismissToast(); this.$refs?.annotationDialog?.close(); },
+    destroy() {
+      disposed = true; controller?.abort(); statisticsController?.abort();
+      if (statisticsTimer !== null) browser.clearTimeout(statisticsTimer);
+      this.dismissToast(); this.$refs?.annotationDialog?.close();
+    },
+    get statisticsClasses() { return (this.statistics?.classes || []).filter(({ label, count }) => this.labels.includes(label) || count > 0); },
+    async loadStatistics() {
+      if (disposed || this.view !== "list") return;
+      if (statisticsTimer !== null) browser.clearTimeout(statisticsTimer);
+      statisticsTimer = null; statisticsController?.abort();
+      const active = new browser.AbortController(); statisticsController = active;
+      const version = ++statisticsVersion;
+      this.statisticsLoading = true; this.statisticsError = "";
+      try {
+        const data = await request("/statistics", { signal: active.signal, cache: "no-store" });
+        if (!data?.statistics || !Array.isArray(data.statistics.classes)) throw new Error("统计返回不完整，请稍后刷新。");
+        if (disposed || version !== statisticsVersion) return;
+        this.statistics = data.statistics; this.statisticsStale = false;
+      } catch (error) {
+        if (!disposed && version === statisticsVersion && error.name !== "AbortError") this.statisticsError = `统计暂不可用：${error.message}`;
+      } finally {
+        if (!disposed && statisticsController === active) { this.statisticsLoading = false; statisticsController = null; }
+      }
+    },
+    queueStatisticsRefresh() {
+      if (disposed || this.view !== "list") return;
+      statisticsVersion++; this.statisticsStale = true;
+      statisticsController?.abort();
+      if (statisticsTimer !== null) browser.clearTimeout(statisticsTimer);
+      try {
+        statisticsTimer = browser.setTimeout(() => { statisticsTimer = null; return this.loadStatistics(); }, statisticsRefreshDelay);
+      } catch {
+        statisticsTimer = null; this.statisticsError = "标注已保存，统计刷新暂不可用，请点击刷新统计。";
+      }
+    },
     notify(message, type = "success") {
       if (disposed) return;
       this.dismissToast();
@@ -211,6 +248,7 @@ export function createImageReviewApp(browser = window) {
         if (disposed) return false;
         this.syncAnnotation(record, label);
         this.notify(`${options.adoptModel ? "已采用模型结果" : "已保存"}：${labelTitle(label)}`);
+        this.queueStatisticsRefresh();
         return true;
       } catch (error) {
         if (!disposed && error.name !== "AbortError") this.reportError(error.message, errorField);

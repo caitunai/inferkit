@@ -228,9 +228,8 @@ func TestImageRecordIdentityIncludesContentURLAndModel(t *testing.T) {
 	result.URL += "?source=other"
 	saveTestImage(t, store, result)
 	imagePage(t, store, DefaultImageQuery(), 2)
-	nextModel := *store
-	nextModel.modelSHA256 = strings.Repeat("c", 64)
-	saveTestImage(t, &nextModel, result)
+	nextModel := &ImageStore{database: store.database, modelSHA256: strings.Repeat("c", 64)}
+	saveTestImage(t, nextModel, result)
 	imagePage(t, store, DefaultImageQuery(), 3)
 }
 

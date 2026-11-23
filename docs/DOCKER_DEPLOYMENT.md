@@ -320,3 +320,7 @@ docker compose logs --tail=100 inferkit
 启动日志应包含 `precision=fp32` 的 OpenVINO 会话配置、实际阶段 provider 和预热完成。缺少插件、设备不支持或算子不能分配给 OpenVINO 时启动失败；可将任一阶段改回 `cpu` 对比或回滚。macOS 开发配置继续使用 `cpu` 或原有 `auto/coreml`，不需要安装 Linux 插件。
 
 `scripts/prepare-openvino-linux.py` 下载官方 `onnxruntime-ep-openvino` 1.8.1 Linux amd64 wheel 并核对固定 SHA256，仅提取 CPU 所需 ELF 和随包声明，不在最终镜像中安装 Python。它不复制 GPU/NPU/AUTO 插件，也不覆盖系统库。`--archive` 可使用同一份校验过的 wheel 离线准备运行库。Docker 构建会用最终非 root 用户检查每个 OpenVINO 动态库的 `ldd` 依赖，插件只在显式选择时加载。[官方插件说明](https://github.com/onnxruntime/onnxruntime-ep-openvino/blob/main/docs/QuickStart.md)
+
+## 人工标注统计升级
+
+本次增加人工标签统计使用的 `(correction, url_sha256)` 覆盖索引，部署新镜像前按现有 Atlas 流程应用 `20261123090000_image_statistics_index.sql`。仅增加索引，不修改已有标注列或记录；表前缀必须与配置和 HCL 一致。统计缓存保存在 Go 进程内（30 秒 TTL），不需要 Redis 配置或新增持久卷。通过同一进程完成的人工标注会在提交后立即使缓存失效，容器重启后首次统计重新聚合。

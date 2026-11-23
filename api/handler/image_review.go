@@ -19,6 +19,7 @@ const imageReviewEntry = "src/image-review/main.js"
 
 // ImageReviewRepository exposes only the management page's persistence needs.
 type ImageReviewRepository interface {
+	Statistics(context.Context) (db.ImageStatistics, error)
 	List(context.Context, db.ImageQuery) (db.ImagePage, error)
 	Get(context.Context, uint) (*db.ImagePrediction, error)
 	Annotate(context.Context, uint, uint64, string, string) error
@@ -38,6 +39,7 @@ func ImageReviewPage(review bool) base.HandlerFunc {
 // ImageReviewControl registers protected management endpoints under /image-review/api.
 func ImageReviewControl(r *base.Router, store ImageReviewRepository) {
 	h := imageReviewHandler{store: store}
+	r.GET("/statistics", h.statistics)
 	r.GET("/results", h.list)
 	r.GET("/results/:id", h.get)
 	r.PUT("/results/:id/annotation", h.annotate)
@@ -45,6 +47,15 @@ func ImageReviewControl(r *base.Router, store ImageReviewRepository) {
 
 type imageReviewHandler struct {
 	store ImageReviewRepository
+}
+
+func (h imageReviewHandler) statistics(c *base.Context) {
+	value, err := h.store.Statistics(c.Request.Context())
+	if err != nil {
+		imageReviewError(c, err)
+		return
+	}
+	c.Success(gin.H{"statistics": value})
 }
 
 func (h imageReviewHandler) list(c *base.Context) {

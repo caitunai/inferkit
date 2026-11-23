@@ -3,6 +3,13 @@
   <header class="review-header"><div class="review-width"><a class="review-brand" href="/image-review">InferKit / 数据审核</a><nav class="review-nav" aria-label="页面导航"><a href="/image-review">识别记录</a><a :href="reviewLink">逐张标注 →</a><a href="/image-review/reclassify">历史重新分类</a></nav></div></header>
   <div class="review-width">
     <div class="review-heading"><h1 x-text="view === 'review' ? '逐张纠错标注' : '图片识别记录'"></h1></div>
+    <section class="review-statistics" x-show="view === 'list'" aria-labelledby="review-statistics-title" :aria-busy="statisticsLoading">
+      <div class="review-statistics-heading"><div><h2 id="review-statistics-title">人工标注数据集</h2><p>按完整图片 URL 去重；全库统计，不随下方筛选或分页变化。</p></div><button class="review-button" type="button" @click="loadStatistics()" :disabled="statisticsLoading" x-text="statisticsLoading ? '统计加载中…' : '刷新统计'"></button></div>
+      <p class="review-statistics-total">已人工标注 <strong x-text="statistics ? Number(statistics.total).toLocaleString() : '—'"></strong> 张图片</p>
+      <div class="review-statistics-grid"><template x-for="group in statisticsClasses" :key="group.label"><div class="review-statistics-count"><span x-text="labelTitle(group.label)"></span><strong x-text="Number(group.count).toLocaleString()"></strong></div></template></div>
+      <p class="review-statistics-note" x-show="statistics" x-text="statisticsStale ? '标注已保存，统计正在更新…' : statistics ? `统计时间：${dateLabel(statistics.generated_at)}` : ''" role="status"></p>
+      <p class="review-statistics-error" x-show="statisticsError" x-text="statisticsError" role="status"></p>
+    </section>
     <form class="review-filters" @submit.prevent="applyFilters()" aria-label="识别结果筛选">
       <label class="review-field">预测类型<select x-model="filters.label" :disabled="busy"><option value="">全部类型</option>{{ range .filter_labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>
       <label class="review-field">人工标注类型<select x-model="filters.correction" @change="correctionChanged()" :disabled="busy"><option value="">全部类型</option>{{ range .filter_labels }}<option value="{{ . }}" x-text="labelTitle($el.value)"></option>{{ end }}</select></label>

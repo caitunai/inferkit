@@ -123,12 +123,29 @@ FROM ifk_image_predictions
 WHERE correction <> '';
 ```
 
+## 人工标注数据集统计
+
+`/image-review` 顶部显示各人工标签和已标注总量，**按完整图片 URL 的 SHA256 去重**，同一 URL 的不同内容 / 模型历史记录不重复计数。只统计 `correction` 中支持的当前十类及历史二分类，不使用模型标签补足未标注图片。统计为全库快照，不随列表筛选、排序或分页变化，采用模型结果生成的人工标签也包括在内。类别分别去重，总数通过全局 DISTINCT 汇总；若导入的历史数据存在同 URL 标签冲突，总数仍只计该 URL 一次。
+
+`GET /image-review/api/statistics` 返回 `data.statistics`，含 `total`、`classes`（`label` / `count`）及 `generated_at`，继续使用审核 Basic Auth 和 HTTP no-store。统计单独加载，失败时不会阻止列表或把已成功的标注报告为失败。当前页面连续标注后等待 350ms 合并一次统计刷新，也可点击「刷新统计」。
+
+冷缓存执行一个仅引用 `correction`、`url_sha256` 的聚合 SELECT：`COUNT(DISTINCT url_sha256)`，按 `correction WITH ROLLUP` 同时生成类别和全局去重总数。[MySQL 分组汇总说明](https://dev.mysql.com/doc/refman/8.0/en/group-by-modifiers.html)。新增 `(correction, url_sha256)` 覆盖索引 `idx_image_prediction_correction_url`，保留已有 `(correction, confidence)` 索引服务分页筛选；两个索引的第二列不同，不能相互代替。不读取 URL 文本、图片、人工审核人或概率向量。
+
+升级前应用新增迁移 **`20261123090000_image_statistics_index.sql`**（默认 `ifk_` 表前缀）。本次只增加索引，不新增列、不重写已有标注。迁移由项目已有 Atlas MySQL HCL 差异 / 规划器离线生成，并通过目录校验；未连接数据库执行迁移或 EXPLAIN。实际访问计划和生产 30 万条数据的耗时仍需在部署数据库验证，预期使用新增覆盖索引；不能把 LIMIT 或缓存命中耗时作为冷查询扫描成本。
+
+每个 `ImageStore`（进程内共享）仅缓存一个全局结果，TTL 30 秒，不连接 Redis。并发未命中合并为一个请求拥有的查询，数据库查询、等待及重试共用最多 5 秒上下文；错误不缓存，空数据结果正常缓存。缓存持有最多 12 类及一个汇总，返回时复制数组，过期按访问惰性刷新，无后台定时器或无界 key 集合。
+
+标注事务提交成功后立即递增缓存版本并失效；冲突、回滚或提交失败不失效。失效期间尚未完成的旧查询不能回填缓存，读取会在原超时预算内重新获取。失效不执行 SQL 统计，不增加标注事务时长或提交后的额外数据库往返。普通图片采集只插入未标注行，历史重新分类不修改人工标签，因此两者不触发无意义的统计失效。
+
+本地缓存不跨进程同步：其他容器或外部 SQL 修改最多受 30 秒 TTL 影响，刷新页面 / 统计会读取所在进程的当前缓存。需要所有副本立即可见时，应采用另行设计的共享失效机制；此功能按要求仅使用进程本地缓存。
+
 ## 管理接口
 
 以下接口均位于独立 Basic Auth 管理范围，使用标准 `status/message/data` 响应封装：
 
 | 方法与路径 | 用途 |
 | --- | --- |
+| `GET /image-review/api/statistics` | 返回按 URL 去重的全局人工标注数量 |
 | `GET /image-review/api/results` | 返回 `data.page.items` 及 `data.page.has_more` |
 | `GET /image-review/api/results/:id` | 返回 `data.record` |
 | `PUT /image-review/api/results/:id/annotation` | 保存人工标签，返回 `data.saved=true` |

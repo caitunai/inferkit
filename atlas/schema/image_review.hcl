@@ -75,6 +75,9 @@ table "ifk_image_predictions" {
   index "idx_image_prediction_label_confidence" {
     columns = [column.label, column.confidence]
   }
+  index "idx_image_prediction_correction_url" {
+    columns = [column.correction, column.url_sha256]
+  }
   index "idx_image_prediction_review_confidence" {
     columns = [column.correction, column.confidence]
   }

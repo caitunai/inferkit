@@ -35,11 +35,11 @@ type ImagePrediction struct {
 	CreatedAt   time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"created_at"`
 	UpdatedAt   time.Time `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
 	URL         string    `gorm:"type:text;not null" json:"url"`
-	URLSHA256   string    `gorm:"size:64;not null;uniqueIndex:idx_image_prediction_identity" json:"-"`
+	URLSHA256   string    `gorm:"size:64;not null;uniqueIndex:idx_image_prediction_identity;index:idx_image_prediction_correction_url,priority:2" json:"-"`
 	SHA256      string    `gorm:"size:64;not null;uniqueIndex:idx_image_prediction_identity" json:"sha256"`
 	ModelSHA256 string    `gorm:"size:64;not null;uniqueIndex:idx_image_prediction_identity" json:"model_sha256"`
 	Label       string    `gorm:"size:128;not null;index:idx_image_prediction_label_confidence,priority:1" json:"label"`
-	Correction  string    `gorm:"size:128;not null;default:'';index:idx_image_prediction_review_confidence,priority:1" json:"correction"`
+	Correction  string    `gorm:"size:128;not null;default:'';index:idx_image_prediction_review_confidence,priority:1;index:idx_image_prediction_correction_url,priority:1" json:"correction"`
 	Reviewer    string    `gorm:"size:128;not null;default:''" json:"reviewer"`
 	ID          uint      `gorm:"type:bigint;primaryKey;autoIncrement" json:"id"`
 	Confidence  float64   `gorm:"not null;default:0;index:idx_image_prediction_confidence;index:idx_image_prediction_label_confidence,priority:2;index:idx_image_prediction_review_confidence,priority:2" json:"confidence"`
@@ -51,6 +51,7 @@ type ImagePrediction struct {
 type ImageStore struct {
 	database    *gorm.DB
 	modelSHA256 string
+	statistics  imageStatisticsCache
 }
 
 // NewImageStore reuses the process-wide pool; the shutdown coordinator owns it.
@@ -148,6 +149,7 @@ func (s *ImageStore) Annotate(ctx context.Context, id uint, revision uint64, lab
 	if err != nil {
 		return errors.Join(ErrImageStorage, err)
 	}
+	s.statistics.invalidate()
 	return nil
 }
 

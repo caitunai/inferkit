@@ -6,12 +6,17 @@ import { filtersFromURL, maxReviewJumpPage, maxReviewOffset, offsetForPage, quer
 const labels = ["00_invalid", "01_valid", "03_childish", "04_paper", "05_other_app", "06_professional", "07_stolen", "08_screenshot", "09_sensitive", "10_photo"];
 const record = (id = 1) => ({ id, url: `https://example.com/${id}.png`, confidence: 0.8, revision: 0, label: "1_valid" });
 function setup(view = "review", responses = []) {
-  const requests = [], timers = new Map();
+  const requests = [], timers = new Map(), statisticsTimers = new Map(), statisticsRequests = [], statisticsResponses = [];
   let timerID = 0;
   const browser = { location: { search: "" }, AbortController,
-    setTimeout(callback, delay) { const id = ++timerID; timers.set(id, { callback, delay }); return id; },
-    clearTimeout(id) { timers.delete(id); },
+    setTimeout(callback, delay) { const id = ++timerID; (delay === 350 ? statisticsTimers : timers).set(id, { callback, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); statisticsTimers.delete(id); },
     fetch: async (url, options) => {
+    if (url.endsWith("/statistics")) {
+      statisticsRequests.push({ url, options });
+      const value = statisticsResponses.shift() || { status: 0, data: { statistics: { total: 0, classes: labels.map((label) => ({ label, count: 0 })), generated_at: "2026-11-23T00:00:00Z" } } };
+      return { ok: value.status === 0, status: value.status || 200, json: async () => value };
+    }
     requests.push({ url, options });
     const response = responses.shift() || { status: 0, data: { page: { items: [], has_more: false } } };
     return { ok: response.status === 0, status: response.status || 200, json: async () => response };
@@ -19,7 +24,7 @@ function setup(view = "review", responses = []) {
   const app = createImageReviewApp(browser); app.$el = { dataset: { view, labels: labels.join(" ") } };
   const dialog = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
   app.$refs = { annotationDialog: dialog }; app.$nextTick = async () => {};
-  return { app, requests, browser, dialog, timers };
+  return { app, requests, browser, dialog, timers, statisticsTimers, statisticsRequests, statisticsResponses };
 }
 const page = (items, hasMore = false) => ({ status: 0, data: { page: { items, has_more: hasMore } } });
 
@@ -574,4 +579,64 @@ test("matching corrections stay visible and failed corrections keep the filtered
   await app.init(); await app.annotateList(first, "10_photo"); assert.equal(app.items.length, 1);
   await app.annotateList(first, "08_screenshot");
   assert.equal(app.items.length, 1); assert.equal(first.correction, "10_photo"); app.destroy();
+});
+
+const statisticsResponse = (total) => ({ status: 0, data: { statistics: { total, classes: [{ label: "10_photo", count: total }], generated_at: "2026-11-23T00:00:00Z" } } });
+
+test("global distinct statistics load once and are independent of filters and pagination", async () => {
+  const { app, statisticsRequests, statisticsResponses } = setup("list", [page([record()], true), page([record(2)], true)]);
+  statisticsResponses.push(statisticsResponse(2));
+  await app.init(); assert.equal(app.statistics.total, 2); assert.equal(statisticsRequests.length, 1);
+  app.filters.label = "00_invalid"; await app.nextPage();
+  assert.equal(statisticsRequests.length, 1); assert.equal(app.statisticsClasses[0].count, 2); app.destroy();
+});
+
+test("rapid successful annotations debounce one independent statistics refresh", async () => {
+  const saved = () => ({ status: 0, data: { saved: true } });
+  const { app, statisticsRequests, statisticsResponses, statisticsTimers } = setup("list", [page([record()]), saved(), saved()]);
+  await app.init(); await app.annotateList(app.items[0], "10_photo"); await app.acceptModel(app.items[0]);
+  assert.equal(statisticsRequests.length, 1); assert.equal(statisticsTimers.size, 1); assert.equal(app.statisticsStale, true);
+  statisticsResponses.push(statisticsResponse(1));
+  const timer = statisticsTimers.values().next().value;
+  assert.equal(timer.delay, 350); await timer.callback();
+  assert.equal(app.statistics.total, 1); assert.equal(app.statisticsStale, false); assert.equal(statisticsRequests.length, 2); app.destroy();
+});
+
+test("failed statistics cannot turn committed annotations or list loading into failures", async () => {
+  const { app, statisticsResponses, statisticsTimers } = setup("list", [page([record()]), { status: 0, data: { saved: true } }]);
+  statisticsResponses.push({ status: 503, message: "统计不可用" });
+  await app.init(); assert.equal(app.items.length, 1); assert.equal(app.error, ""); assert.match(app.statisticsError, /统计不可用/);
+  await app.annotateList(app.items[0], "10_photo");
+  statisticsResponses.push({ status: 503, message: "统计读取超时" });
+  await statisticsTimers.values().next().value.callback();
+  assert.equal(app.items[0].correction, "10_photo"); assert.equal(app.items[0].revision, 1);
+  assert.equal(app.toast.type, "success"); assert.equal(app.error, ""); assert.match(app.statisticsError, /超时/); app.destroy();
+});
+
+test("failed annotations do not schedule statistics refreshes and destruction clears pending work", async () => {
+  const { app, statisticsTimers, statisticsRequests } = setup("list", [page([record()]), { status: 409, message: "版本冲突" }, { status: 0, data: { saved: true } }]);
+  await app.init(); await app.annotateList(app.items[0], "10_photo"); assert.equal(statisticsTimers.size, 0);
+  await app.annotateList(app.items[0], "10_photo"); assert.equal(statisticsTimers.size, 1);
+  app.destroy(); assert.equal(statisticsTimers.size, 0); assert.equal(statisticsRequests.length, 1);
+});
+
+test("stale statistics replies cannot overwrite a newer annotation epoch", async () => {
+  const { app, browser, statisticsTimers } = setup("list", [page([record()])]); await app.init();
+  let finish;
+  browser.fetch = async (url) => {
+    if (url.endsWith("/statistics")) return new Promise((resolve) => { finish = resolve; });
+    return { ok: true, status: 200, json: async () => ({ status: 0, data: { saved: true } }) };
+  };
+  const pending = app.loadStatistics(); await app.annotateList(app.items[0], "10_photo");
+  finish({ ok: true, status: 200, json: async () => statisticsResponse(99) }); await pending;
+  assert.equal(app.statistics.total, 0); assert.equal(app.statisticsStale, true); assert.equal(statisticsTimers.size, 1); app.destroy();
+});
+
+test("statistics timer failures cannot make an accepted annotation appear failed", async () => {
+  const { app, browser } = setup("list", [page([record()]), { status: 0, data: { saved: true } }]); await app.init();
+  const schedule = browser.setTimeout;
+  browser.setTimeout = (callback, delay) => { if (delay === 350) throw new Error("timers unavailable"); return schedule(callback, delay); };
+  await app.annotateList(app.items[0], "10_photo");
+  assert.equal(app.items[0].correction, "10_photo"); assert.equal(app.items[0].revision, 1);
+  assert.equal(app.toast.type, "success"); assert.equal(app.error, ""); assert.match(app.statisticsError, /标注已保存/); app.destroy();
 });

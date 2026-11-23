@@ -24,6 +24,10 @@ type imageReviewStub struct {
 	writes          int
 }
 
+func (*imageReviewStub) Statistics(context.Context) (db.ImageStatistics, error) {
+	return db.ImageStatistics{Classes: []db.ImageClassCount{}}, nil
+}
+
 func (*imageReviewStub) List(_ context.Context, q db.ImageQuery) (db.ImagePage, error) {
 	if err := q.Validate(); err != nil {
 		return db.ImagePage{}, errors.Join(db.ErrImageQuery, err)
